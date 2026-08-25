@@ -8,28 +8,39 @@
 #include <time.h>
 
 namespace {
-lv_obj_t* dateLabel = nullptr;
-lv_obj_t* timeLabel = nullptr;
+lv_obj_t* clockLabel = nullptr;
+lv_obj_t* wifiLabel = nullptr;
 lv_obj_t* batteryLabel = nullptr;
 lv_obj_t* tempLabel = nullptr;
 lv_obj_t* humLabel = nullptr;
-lv_obj_t* statusLabel = nullptr;
+lv_obj_t* statusMsgLabel = nullptr;
+lv_obj_t* statusDetailLabel = nullptr;
 lv_obj_t* footerLabel = nullptr;
 lv_obj_t* chartPanel = nullptr;
 lv_obj_t* tempChart = nullptr;
 lv_chart_series_t* tempSeries = nullptr;
 lv_obj_t* chartModeLabel = nullptr;
 lv_obj_t* yAxisLabels[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+lv_obj_t* xAxisLabels[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
 
 bool chartYAuto = false;
 lv_coord_t chartYValues[CHART_POINTS];
 
+constexpr int HEADER_H = 26;
+constexpr int VALUE_H = 22;
+constexpr int CHART_PANEL_TOP = HEADER_H + VALUE_H;
+constexpr int CHART_PANEL_H = 158;
 constexpr int CHART_LEFT = 34;
-constexpr int CHART_TOP = 24;
+constexpr int CHART_TOP = 20;
 constexpr int CHART_W = SCREEN_W - 20 - CHART_LEFT;
-constexpr int CHART_H = 108;
+constexpr int CHART_H = 112;
+constexpr int STATUS_TOP = CHART_PANEL_TOP + CHART_PANEL_H + 2;
+
 constexpr int Y_TICK_COUNT = 5;
 constexpr int Y_TICKS_FIXED[Y_TICK_COUNT] = {45, 40, 35, 30, 20};
+
+constexpr int X_TICK_COUNT = 5;
+constexpr const char* X_TICK_TEXT[X_TICK_COUNT] = {"-12h", "-9h", "-6h", "-3h", "now"};
 
 const lv_font_t* fontAscii() { return &lv_font_montserrat_14; }
 
@@ -65,19 +76,17 @@ lv_obj_t* makeAsciiLabel(lv_obj_t* parent, int x, int y, int w) {
   return label;
 }
 
-void updateClockLabels(bool ntpSynced) {
-  if (!dateLabel || !timeLabel) return;
+void updateClockLabel(bool ntpSynced) {
+  if (!clockLabel) return;
 
   const time_t now = time(nullptr);
   struct tm timeInfo {};
   if (ntpSynced && now >= 1700000000 && localtime_r(&now, &timeInfo)) {
-    lv_label_set_text_fmt(dateLabel, "%04d-%02d-%02d", timeInfo.tm_year + 1900, timeInfo.tm_mon + 1,
-                          timeInfo.tm_mday);
-    lv_label_set_text_fmt(timeLabel, "%02d:%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min,
+    lv_label_set_text_fmt(clockLabel, "%04d-%02d-%02d %02d:%02d:%02d", timeInfo.tm_year + 1900,
+                          timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
                           timeInfo.tm_sec);
   } else {
-    lv_label_set_text(dateLabel, "---- -- --");
-    lv_label_set_text(timeLabel, "--:--:--");
+    lv_label_set_text(clockLabel, "---- -- -- --:--:--");
   }
 }
 
@@ -101,53 +110,58 @@ void updateYAxisLabels(lv_coord_t yMin, lv_coord_t yMax) {
 
 void createHeader() {
   lv_obj_t* header = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(header, SCREEN_W, 36);
+  lv_obj_set_size(header, SCREEN_W, HEADER_H);
   lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
   stylePanel(header, false);
   lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* title = lv_label_create(header);
-  lv_label_set_text(title, "Temp Mon");
+  lv_label_set_text(title, "TempMon");
   lv_obj_set_style_text_font(title, fontAscii(), 0);
   setTextColor(title, false);
-  lv_obj_align(title, LV_ALIGN_LEFT_MID, 6, 0);
+  lv_obj_align(title, LV_ALIGN_LEFT_MID, 4, 0);
+
+  clockLabel = makeAsciiLabel(header, 68, 4, 210);
+  lv_obj_set_style_text_align(clockLabel, LV_TEXT_ALIGN_CENTER, 0);
 
   batteryLabel = lv_label_create(header);
   lv_label_set_text(batteryLabel, LV_SYMBOL_BATTERY_FULL);
   lv_obj_set_style_text_font(batteryLabel, fontAscii(), 0);
   setTextColor(batteryLabel, false);
-  lv_obj_align(batteryLabel, LV_ALIGN_RIGHT_MID, -4, 0);
+  lv_obj_align(batteryLabel, LV_ALIGN_RIGHT_MID, -2, 0);
 
-  dateLabel = makeAsciiLabel(header, 88, 2, 110);
-  timeLabel = makeAsciiLabel(header, 200, 2, 96);
-  lv_obj_set_style_text_align(timeLabel, LV_TEXT_ALIGN_RIGHT, 0);
+  wifiLabel = lv_label_create(header);
+  lv_label_set_text(wifiLabel, LV_SYMBOL_WIFI);
+  lv_obj_set_style_text_font(wifiLabel, fontAscii(), 0);
+  setTextColor(wifiLabel, false);
+  lv_obj_align(wifiLabel, LV_ALIGN_RIGHT_MID, -22, 0);
 }
 
 void createValueRow() {
   lv_obj_t* panel = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(panel, SCREEN_W, 44);
-  lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 36);
+  lv_obj_set_size(panel, SCREEN_W, VALUE_H);
+  lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, HEADER_H);
   stylePanel(panel, false);
   lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
-  tempLabel = makeAsciiLabel(panel, 16, 10, 170);
+  tempLabel = makeAsciiLabel(panel, 12, 3, 170);
   lv_label_set_text(tempLabel, "T: --.- C");
 
-  humLabel = makeAsciiLabel(panel, 210, 10, 180);
+  humLabel = makeAsciiLabel(panel, 210, 3, 180);
   lv_label_set_text(humLabel, "H: --.- %");
 }
 
 void createChartPanel() {
   chartPanel = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(chartPanel, SCREEN_W, 152);
-  lv_obj_align(chartPanel, LV_ALIGN_TOP_MID, 0, 80);
+  lv_obj_set_size(chartPanel, SCREEN_W, CHART_PANEL_H);
+  lv_obj_align(chartPanel, LV_ALIGN_TOP_MID, 0, CHART_PANEL_TOP);
   stylePanel(chartPanel, false);
   lv_obj_clear_flag(chartPanel, LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t* title = makeAsciiLabel(chartPanel, 8, 4, 120);
+  lv_obj_t* title = makeAsciiLabel(chartPanel, 8, 2, 100);
   lv_label_set_text(title, "12h Temp");
 
-  chartModeLabel = makeAsciiLabel(chartPanel, 280, 4, 110);
+  chartModeLabel = makeAsciiLabel(chartPanel, 280, 2, 110);
   lv_label_set_text(chartModeLabel, "20-45C");
   lv_obj_set_style_text_align(chartModeLabel, LV_TEXT_ALIGN_RIGHT, 0);
 
@@ -163,7 +177,7 @@ void createChartPanel() {
   lv_chart_set_type(tempChart, LV_CHART_TYPE_LINE);
   lv_chart_set_point_count(tempChart, CHART_POINTS);
   lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, CHART_Y_MIN, CHART_Y_MAX);
-  lv_chart_set_div_line_count(tempChart, 4, 6);
+  lv_chart_set_div_line_count(tempChart, 4, X_TICK_COUNT - 1);
   lv_obj_set_style_size(tempChart, 0, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(tempChart, 2, LV_PART_ITEMS);
   lv_obj_set_style_bg_color(tempChart, lv_color_white(), 0);
@@ -173,16 +187,33 @@ void createChartPanel() {
   tempSeries = lv_chart_add_series(tempChart, lv_color_black(), LV_CHART_AXIS_PRIMARY_Y);
   lv_chart_set_ext_y_array(tempChart, tempSeries, chartYValues);
 
-  lv_obj_t* leftMark = makeAsciiLabel(chartPanel, CHART_LEFT, 136, 60);
-  lv_label_set_text(leftMark, "-12h");
-
-  lv_obj_t* rightMark = makeAsciiLabel(chartPanel, SCREEN_W - 68, 136, 60);
-  lv_label_set_text(rightMark, "now");
-  lv_obj_set_style_text_align(rightMark, LV_TEXT_ALIGN_RIGHT, 0);
+  const int xAxisY = CHART_TOP + CHART_H + 4;
+  for (int i = 0; i < X_TICK_COUNT; ++i) {
+    const int tickX = CHART_LEFT + (i * CHART_W) / (X_TICK_COUNT - 1);
+    int labelW = 40;
+    int labelX = tickX - labelW / 2;
+    if (i == 0) {
+      labelX = CHART_LEFT;
+      labelW = 44;
+    } else if (i == X_TICK_COUNT - 1) {
+      labelX = CHART_LEFT + CHART_W - 36;
+      labelW = 36;
+    }
+    xAxisLabels[i] = makeAsciiLabel(chartPanel, labelX, xAxisY, labelW);
+    lv_label_set_text(xAxisLabels[i], X_TICK_TEXT[i]);
+    if (i == X_TICK_COUNT - 1) {
+      lv_obj_set_style_text_align(xAxisLabels[i], LV_TEXT_ALIGN_RIGHT, 0);
+    } else if (i == 0) {
+      lv_obj_set_style_text_align(xAxisLabels[i], LV_TEXT_ALIGN_LEFT, 0);
+    } else {
+      lv_obj_set_style_text_align(xAxisLabels[i], LV_TEXT_ALIGN_CENTER, 0);
+    }
+  }
 }
 
 void createStatusBar() {
-  statusLabel = makeAsciiLabel(lv_scr_act(), 6, 236, SCREEN_W - 12);
+  statusMsgLabel = makeAsciiLabel(lv_scr_act(), 6, STATUS_TOP, SCREEN_W - 12);
+  statusDetailLabel = makeAsciiLabel(lv_scr_act(), 6, STATUS_TOP + 16, SCREEN_W - 12);
   footerLabel = makeAsciiLabel(lv_scr_act(), 0, 0, SCREEN_W - 8);
   lv_obj_align(footerLabel, LV_ALIGN_BOTTOM_MID, 0, -2);
 }
@@ -281,7 +312,17 @@ bool uiToggleChartYAxis() {
 void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct, bool hasSensor,
               int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, bool sdReady,
               const char* statusLine) {
-  updateClockLabels(ntpSynced);
+  updateClockLabel(ntpSynced);
+
+  if (wifiLabel) {
+    if (wifiManagerPortalActive()) {
+      lv_label_set_text(wifiLabel, LV_SYMBOL_SETTINGS);
+    } else if (wifiConnected) {
+      lv_label_set_text(wifiLabel, LV_SYMBOL_WIFI);
+    } else {
+      lv_label_set_text(wifiLabel, LV_SYMBOL_CLOSE);
+    }
+  }
 
   if (batteryLabel) {
     lv_label_set_text(batteryLabel, batterySymbol(batteryPct));
@@ -303,12 +344,15 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
     }
   }
 
-  if (statusLabel) {
-    char line[128];
-    snprintf(line, sizeof(line), "%s | WiFi:%s | NTP:%s | SD:%s | SHTC3:%s | Rec:%u/%u",
-             statusLine ? statusLine : "", wifiConnected ? "OK" : "--", ntpSynced ? "OK" : "--",
+  if (statusMsgLabel) {
+    lv_label_set_text(statusMsgLabel, statusLine ? statusLine : "");
+  }
+
+  if (statusDetailLabel) {
+    char line[80];
+    snprintf(line, sizeof(line), "NTP:%s  SD:%s  SHTC3:%s  Rec:%u/%u", ntpSynced ? "OK" : "--",
              sdReady ? "OK" : "--", hasSensor ? "OK" : "ERR", recordCount, recordMax);
-    lv_label_set_text(statusLabel, line);
+    lv_label_set_text(statusDetailLabel, line);
   }
 
   if (footerLabel) {
