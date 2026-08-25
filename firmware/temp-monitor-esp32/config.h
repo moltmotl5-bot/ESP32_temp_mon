@@ -42,6 +42,10 @@ constexpr uint16_t RECORD_DAYS = 3;
 constexpr uint16_t RECORD_MAX = RECORDS_PER_DAY * RECORD_DAYS;  // 864
 constexpr uint16_t CHART_POINTS = 144;         // 12 hours @ 5 min
 
+// Chart Y-axis (°C)
+constexpr int16_t CHART_Y_MIN = 20;
+constexpr int16_t CHART_Y_MAX = 45;
+
 constexpr const char* WIFI_PORTAL_SSID = "TempMon-Setup";
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_SEC = 20;
 

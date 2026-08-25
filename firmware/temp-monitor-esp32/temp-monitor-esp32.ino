@@ -149,7 +149,7 @@ void handleButton(ButtonEvent event) {
       if (uiToggleChartYAxis()) {
         strncpy(statusLine, "Chart Y: auto", sizeof(statusLine) - 1);
       } else {
-        strncpy(statusLine, "Chart Y: 15-35C", sizeof(statusLine) - 1);
+        strncpy(statusLine, "Chart Y: 20-45C", sizeof(statusLine) - 1);
       }
       statusLine[sizeof(statusLine) - 1] = '\0';
       refreshScreen();

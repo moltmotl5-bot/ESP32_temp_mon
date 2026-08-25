@@ -18,10 +18,18 @@ lv_obj_t* footerLabel = nullptr;
 lv_obj_t* chartPanel = nullptr;
 lv_obj_t* tempChart = nullptr;
 lv_chart_series_t* tempSeries = nullptr;
-lv_obj_t* chartYLabel = nullptr;
+lv_obj_t* chartModeLabel = nullptr;
+lv_obj_t* yAxisLabels[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
 
-bool chartYAuto = true;
+bool chartYAuto = false;
 lv_coord_t chartYValues[CHART_POINTS];
+
+constexpr int CHART_LEFT = 34;
+constexpr int CHART_TOP = 24;
+constexpr int CHART_W = SCREEN_W - 20 - CHART_LEFT;
+constexpr int CHART_H = 108;
+constexpr int Y_TICK_COUNT = 5;
+constexpr int Y_TICKS_FIXED[Y_TICK_COUNT] = {45, 40, 35, 30, 20};
 
 const lv_font_t* fontAscii() { return &lv_font_montserrat_14; }
 
@@ -73,6 +81,29 @@ void updateClockLabels(bool ntpSynced) {
   }
 }
 
+void updateYAxisLabels(lv_coord_t yMin, lv_coord_t yMax) {
+  for (int i = 0; i < Y_TICK_COUNT; ++i) {
+    if (!yAxisLabels[i]) continue;
+
+    int tickValue = 0;
+    if (chartYAuto) {
+      const float ratio = static_cast<float>(Y_TICK_COUNT - 1 - i) / static_cast<float>(Y_TICK_COUNT - 1);
+      tickValue = static_cast<int>(yMin + ratio * (yMax - yMin) + 0.5f);
+    } else {
+      tickValue = Y_TICKS_FIXED[i];
+    }
+
+    lv_label_set_text_fmt(yAxisLabels[i], "%d", tickValue);
+    const int y = CHART_TOP + (i * CHART_H) / (Y_TICK_COUNT - 1) - 6;
+    lv_obj_set_pos(yAxisLabels[i], 4, y);
+  }
+
+  if (yAxisLabels[Y_TICK_COUNT - 1]) {
+    lv_label_set_text(yAxisLabels[Y_TICK_COUNT - 1], "20");
+    lv_obj_set_pos(yAxisLabels[Y_TICK_COUNT - 1], 4, CHART_TOP + CHART_H - 12);
+  }
+}
+
 void createHeader() {
   lv_obj_t* header = lv_obj_create(lv_scr_act());
   lv_obj_set_size(header, SCREEN_W, 36);
@@ -121,16 +152,22 @@ void createChartPanel() {
   lv_obj_t* title = makeAsciiLabel(chartPanel, 8, 4, 120);
   lv_label_set_text(title, "12h Temp");
 
-  chartYLabel = makeAsciiLabel(chartPanel, 280, 4, 110);
-  lv_label_set_text(chartYLabel, "Y:auto");
-  lv_obj_set_style_text_align(chartYLabel, LV_TEXT_ALIGN_RIGHT, 0);
+  chartModeLabel = makeAsciiLabel(chartPanel, 280, 4, 110);
+  lv_label_set_text(chartModeLabel, "20-45C");
+  lv_obj_set_style_text_align(chartModeLabel, LV_TEXT_ALIGN_RIGHT, 0);
+
+  for (int i = 0; i < Y_TICK_COUNT; ++i) {
+    yAxisLabels[i] = makeAsciiLabel(chartPanel, 4, CHART_TOP, 28);
+    lv_label_set_text(yAxisLabels[i], "--");
+    lv_obj_set_style_text_align(yAxisLabels[i], LV_TEXT_ALIGN_RIGHT, 0);
+  }
 
   tempChart = lv_chart_create(chartPanel);
-  lv_obj_set_size(tempChart, SCREEN_W - 20, 108);
-  lv_obj_align(tempChart, LV_ALIGN_TOP_MID, 0, 24);
+  lv_obj_set_size(tempChart, CHART_W, CHART_H);
+  lv_obj_set_pos(tempChart, CHART_LEFT, CHART_TOP);
   lv_chart_set_type(tempChart, LV_CHART_TYPE_LINE);
   lv_chart_set_point_count(tempChart, CHART_POINTS);
-  lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, 15, 35);
+  lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, CHART_Y_MIN, CHART_Y_MAX);
   lv_chart_set_div_line_count(tempChart, 4, 6);
   lv_obj_set_style_size(tempChart, 0, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(tempChart, 2, LV_PART_ITEMS);
@@ -141,10 +178,10 @@ void createChartPanel() {
   tempSeries = lv_chart_add_series(tempChart, lv_color_black(), LV_CHART_AXIS_PRIMARY_Y);
   lv_chart_set_ext_y_array(tempChart, tempSeries, chartYValues);
 
-  lv_obj_t* leftMark = makeAsciiLabel(chartPanel, 8, 136, 60);
+  lv_obj_t* leftMark = makeAsciiLabel(chartPanel, CHART_LEFT, 136, 60);
   lv_label_set_text(leftMark, "-12h");
 
-  lv_obj_t* rightMark = makeAsciiLabel(chartPanel, 320, 136, 60);
+  lv_obj_t* rightMark = makeAsciiLabel(chartPanel, SCREEN_W - 68, 136, 60);
   lv_label_set_text(rightMark, "now");
   lv_obj_set_style_text_align(rightMark, LV_TEXT_ALIGN_RIGHT, 0);
 }
@@ -156,6 +193,12 @@ void createStatusBar() {
 }
 
 void fillChartYRange(float* yMinOut, float* yMaxOut, const TempRecord* recs, uint16_t count) {
+  if (!chartYAuto) {
+    if (yMinOut) *yMinOut = static_cast<float>(CHART_Y_MIN);
+    if (yMaxOut) *yMaxOut = static_cast<float>(CHART_Y_MAX);
+    return;
+  }
+
   float minT = 999.0f;
   float maxT = -999.0f;
 
@@ -166,15 +209,9 @@ void fillChartYRange(float* yMinOut, float* yMaxOut, const TempRecord* recs, uin
     }
   }
 
-  if (!chartYAuto) {
-    if (yMinOut) *yMinOut = 15.0f;
-    if (yMaxOut) *yMaxOut = 35.0f;
-    return;
-  }
-
   if (count == 0) {
-    if (yMinOut) *yMinOut = 15.0f;
-    if (yMaxOut) *yMaxOut = 35.0f;
+    if (yMinOut) *yMinOut = static_cast<float>(CHART_Y_MIN);
+    if (yMaxOut) *yMaxOut = static_cast<float>(CHART_Y_MAX);
     return;
   }
 
@@ -212,11 +249,13 @@ void uiRefreshChart() {
   const uint16_t count = recordStoreCopyRecent(CHART_POINTS, recs);
   const uint16_t pad = count < CHART_POINTS ? CHART_POINTS - count : 0;
 
-  float yMin = 15.0f;
-  float yMax = 35.0f;
+  float yMin = static_cast<float>(CHART_Y_MIN);
+  float yMax = static_cast<float>(CHART_Y_MAX);
   fillChartYRange(&yMin, &yMax, recs, count);
-  lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, static_cast<lv_coord_t>(yMin),
-                     static_cast<lv_coord_t>(yMax));
+
+  const lv_coord_t yMinCoord = static_cast<lv_coord_t>(yMin);
+  const lv_coord_t yMaxCoord = static_cast<lv_coord_t>(yMax);
+  lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, yMinCoord, yMaxCoord);
 
   for (uint16_t i = 0; i < pad; ++i) {
     chartYValues[i] = LV_CHART_POINT_NONE;
@@ -226,12 +265,14 @@ void uiRefreshChart() {
   }
 
   lv_chart_refresh(tempChart);
+  updateYAxisLabels(yMinCoord, yMaxCoord);
 
-  if (chartYLabel) {
+  if (chartModeLabel) {
     if (chartYAuto) {
-      lv_label_set_text_fmt(chartYLabel, "Y:%d-%dC", static_cast<int>(yMin), static_cast<int>(yMax));
+      lv_label_set_text_fmt(chartModeLabel, "auto %d-%dC", static_cast<int>(yMin),
+                            static_cast<int>(yMax));
     } else {
-      lv_label_set_text(chartYLabel, "Y:15-35C");
+      lv_label_set_text(chartModeLabel, "20-45C");
     }
   }
 }
@@ -278,7 +319,7 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
     if (wifiManagerPortalActive() || !wifiConnected) {
       lv_label_set_text(footerLabel, "Join TempMon-Setup | KEY: setup | BOOT: reset");
     } else {
-      lv_label_set_text(footerLabel, "KEY:read BOOT:Y-axis BOOTlong:clear");
+      lv_label_set_text(footerLabel, "KEY:read BOOT:auto-Y BOOTlong:clear");
     }
   }
 }
