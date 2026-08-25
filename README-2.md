@@ -26,7 +26,7 @@
 Waveshare ESP32-S3-RLCD-4.2
   ├── ESP32-S3（Wi-Fi / BLE）
   │     ├── NTP 時間同步
-  │     ├── NVS / LittleFS（3 天歷史紀錄）
+  │     ├── NVS（3 天環形緩衝）+ TF 卡 CSV（長期保存）
   │     └── 電池 ADC（GPIO4）+ 電源保持（GPIO17）
   ├── ST7305 400×300 RLCD（SPI）
   │     └── LVGL 8.3 UI（日期、時間、溫濕度、折線圖）
@@ -48,8 +48,11 @@ Waveshare ESP32-S3-RLCD-4.2
 | 18 | KEY 按鈕（active LOW） |
 | 4 | 電池 ADC（單節鋰電，3× 分壓） |
 | 17 | 電池電源保持（維持 HIGH） |
+| 38 | TF 卡 SDMMC CLK |
+| 21 | TF 卡 SDMMC CMD |
+| 39 | TF 卡 SDMMC D0（1-bit 模式） |
 
-> 官方文件：[Waveshare ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-ESPHome-Tutorials/Example-RLCD-Voice)
+> TF 卡槽接法參考 Waveshare 官方範例 `06_SD_Card`（SDMMC 1-bit，FAT32）。
 
 ### 1.3 電池電壓對照
 
@@ -328,20 +331,27 @@ RAM Ring Buffer（144 筆）          Flash Ring Buffer（864 筆）
 - [x] 狀態列與錯誤提示
 - [x] BOOT 短按切換 Y 軸（自動 / 固定 15–35°C）
 
-### Phase 4 — 穩定化與測試
+### Phase 4 — SD 卡長期保存
+
+- [x] SDMMC 1-bit 掛載（CLK=38, CMD=21, D0=39，Waveshare 官方接腳）
+- [x] 每次 5 分鐘取樣同步 append 至 `/sdcard/temp_log.csv`
+- [x] CSV 欄位：`timestamp,datetime,temp_c,humidity_pct`
+- [x] 無卡時 NVS 仍正常；狀態列顯示 `SD:OK` / `SD:--`
+
+### Phase 5 — 穩定化與測試
 
 - [ ] 斷電恢復測試（3 天紀錄完整）
 - [ ] 72 小時連續運行（電池供電 + USB 供電）
 - [ ] Wi-Fi 斷線 / 重連、NTP 重同步
 - [ ] 低電量行為（是否進入省電模式）
 
-### Phase 5 — 延伸功能（選配）
+### Phase 6 — 延伸功能（選配）
 
 - [ ] WiFiManager captive portal（沿用 ETA App 流程）
 - [ ] Web 介面查詢 3 天歷史（ESP32 HTTP Server）
 - [ ] OTA 韌體更新
 - [ ] 溫度超標告警（螢幕閃爍 / Serial 通知）
-- [ ] 資料匯出 CSV（Serial / Web）
+- [x] 資料匯出 CSV（TF 卡 `temp_log.csv`）
 
 ---
 

@@ -1,6 +1,7 @@
 #include "record_store.h"
 
 #include "config.h"
+#include "sd_logger.h"
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -74,6 +75,11 @@ bool recordStoreAppend(uint32_t timestamp, float tempC, float humPct) {
 
   Serial.printf("Record saved: ts=%lu %.1f C %.1f %% (%u/%u)\n", static_cast<unsigned long>(timestamp),
                 tempC, humPct, count, RECORD_MAX);
+
+  if (sdLoggerReady()) {
+    sdLoggerAppend(timestamp, tempC, humPct);
+  }
+
   return true;
 }
 

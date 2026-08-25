@@ -35,6 +35,11 @@ constexpr uint32_t SENSOR_READ_MS = 60000;
 constexpr uint32_t BATTERY_READ_MS = 2000;
 constexpr uint32_t UI_CLOCK_MS = 1000;
 
+// TF/microSD — Waveshare 06_SD_Card example (SDMMC 1-bit)
+constexpr uint8_t SD_MMC_CLK = 38;
+constexpr uint8_t SD_MMC_CMD = 21;
+constexpr uint8_t SD_MMC_D0 = 39;
+
 // Phase 2: 3-day history @ 5-minute intervals
 constexpr uint32_t SAMPLE_INTERVAL_SEC = 300;  // 5 min
 constexpr uint16_t RECORDS_PER_DAY = 288;      // 24 * 60 / 5

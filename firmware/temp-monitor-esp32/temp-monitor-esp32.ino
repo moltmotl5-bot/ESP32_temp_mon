@@ -1,6 +1,6 @@
 /**
  * Temp Monitor — Waveshare ESP32-S3-RLCD-4.2
- * Phase 3: 12-hour temperature chart + full dashboard UI
+ * Phase 4: SD card long-term CSV logging (alongside NVS)
  */
 
 #define LV_CONF_INCLUDE_SIMPLE
@@ -15,6 +15,7 @@
 #include "display_epaper.h"
 #include "input_buttons.h"
 #include "record_store.h"
+#include "sd_logger.h"
 #include "ui_lvgl.h"
 #include "wifi_manager.h"
 
@@ -34,7 +35,7 @@ constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
 void refreshScreen() {
   if (!displayReady()) return;
   uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
-           recordStoreCount(), recordStoreMax(), statusLine);
+           recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
 
@@ -42,7 +43,7 @@ void serviceTick() {
   displayTick();
   if (!displayReady()) return;
   uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
-           recordStoreCount(), recordStoreMax(), statusLine);
+           recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
 
@@ -176,13 +177,14 @@ void setup() {
   }
   delay(200);
   Serial.println();
-  Serial.println("=== Temp Monitor Phase 3 boot ===");
+  Serial.println("=== Temp Monitor Phase 4 boot ===");
 
   boardPowerInit();
   delay(100);
 
   inputInit();
   recordStoreInit();
+  sdLoggerInit();
 
   hasSensor = sensorInit();
   Serial.printf("SHTC3: %s\n", hasSensor ? "OK" : "FAIL");
@@ -236,7 +238,7 @@ void loop() {
     maybeStoreSample();
     if (displayReady()) {
       uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor,
-               lastBatteryPct, recordStoreCount(), recordStoreMax(), statusLine);
+               lastBatteryPct, recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
       displayRefreshFull();
     }
   }

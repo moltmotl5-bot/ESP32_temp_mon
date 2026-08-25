@@ -97,11 +97,6 @@ void updateYAxisLabels(lv_coord_t yMin, lv_coord_t yMax) {
     const int y = CHART_TOP + (i * CHART_H) / (Y_TICK_COUNT - 1) - 6;
     lv_obj_set_pos(yAxisLabels[i], 4, y);
   }
-
-  if (yAxisLabels[Y_TICK_COUNT - 1]) {
-    lv_label_set_text(yAxisLabels[Y_TICK_COUNT - 1], "20");
-    lv_obj_set_pos(yAxisLabels[Y_TICK_COUNT - 1], 4, CHART_TOP + CHART_H - 12);
-  }
 }
 
 void createHeader() {
@@ -284,7 +279,8 @@ bool uiToggleChartYAxis() {
 }
 
 void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct, bool hasSensor,
-              int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, const char* statusLine) {
+              int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, bool sdReady,
+              const char* statusLine) {
   updateClockLabels(ntpSynced);
 
   if (batteryLabel) {
@@ -308,10 +304,10 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
   }
 
   if (statusLabel) {
-    char line[112];
-    snprintf(line, sizeof(line), "%s | WiFi:%s | NTP:%s | SHTC3:%s | Rec:%u/%u",
+    char line[128];
+    snprintf(line, sizeof(line), "%s | WiFi:%s | NTP:%s | SD:%s | SHTC3:%s | Rec:%u/%u",
              statusLine ? statusLine : "", wifiConnected ? "OK" : "--", ntpSynced ? "OK" : "--",
-             hasSensor ? "OK" : "ERR", recordCount, recordMax);
+             sdReady ? "OK" : "--", hasSensor ? "OK" : "ERR", recordCount, recordMax);
     lv_label_set_text(statusLabel, line);
   }
 
