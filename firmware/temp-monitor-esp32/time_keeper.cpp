@@ -1,5 +1,7 @@
 #include "time_keeper.h"
 
+#include "record_store.h"
+
 #include <Arduino.h>
 #include <Preferences.h>
 #include <sys/time.h>
@@ -30,6 +32,16 @@ void timeKeeperInit() {
   if (saved >= EPOCH_MIN) {
     applyEpoch(static_cast<time_t>(saved));
     Serial.printf("Time restored from NVS: %lu\n", static_cast<unsigned long>(saved));
+  }
+
+  uint32_t latestRecTs = 0;
+  if (recordStoreLatestTimestamp(&latestRecTs)) {
+    const time_t now = time(nullptr);
+    if (static_cast<time_t>(latestRecTs) > now) {
+      applyEpoch(static_cast<time_t>(latestRecTs));
+      Serial.printf("Time aligned to latest record: %lu\n", static_cast<unsigned long>(latestRecTs));
+      timeKeeperPersist();
+    }
   }
 }
 

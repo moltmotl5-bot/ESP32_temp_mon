@@ -103,6 +103,15 @@ uint16_t recordStoreCopyRecent(uint16_t maxCount, TempRecord* out) {
   return n;
 }
 
+bool recordStoreLatestTimestamp(uint32_t* outTs) {
+  if (!loaded) recordStoreInit();
+  if (!outTs || count == 0) return false;
+
+  const int idx = (static_cast<int>(head) - 1 + RECORD_MAX) % RECORD_MAX;
+  *outTs = records[idx].timestamp;
+  return records[idx].timestamp >= 1700000000UL;
+}
+
 void recordStoreClear() {
   if (!loaded) recordStoreInit();
 
