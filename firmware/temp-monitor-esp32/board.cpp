@@ -10,6 +10,11 @@ bool sensorReady = false;
 bool batteryReady = false;
 float batteryFilteredPct = -1.0f;
 
+constexpr uint16_t SHTC3_PRODUCT_CODE = 0x0807;
+constexpr uint16_t SHTC3_PRODUCT_MASK = 0x083F;
+
+bool isShtc3ProductId(uint16_t id) { return (id & SHTC3_PRODUCT_MASK) == SHTC3_PRODUCT_CODE; }
+
 bool writeCommand(uint16_t cmd) {
   Wire.beginTransmission(SHTC3_ADDR);
   Wire.write(static_cast<uint8_t>(cmd >> 8));
@@ -17,7 +22,7 @@ bool writeCommand(uint16_t cmd) {
   return Wire.endTransmission() == 0;
 }
 
-bool probeSensor(uint8_t* idMsbOut = nullptr, uint8_t* idLsbOut = nullptr) {
+bool probeSensor(uint16_t* idOut = nullptr) {
   if (!writeCommand(0x3517)) return false;  // wake
   delay(2);
   if (!writeCommand(0xEFC8)) return false;  // read ID
@@ -26,9 +31,10 @@ bool probeSensor(uint8_t* idMsbOut = nullptr, uint8_t* idLsbOut = nullptr) {
   const uint8_t idLsb = Wire.read();
   Wire.read();  // CRC
   writeCommand(0xB098);  // sleep
-  if (idMsbOut) *idMsbOut = idMsb;
-  if (idLsbOut) *idLsbOut = idLsb;
-  return idMsb == 0x08 && idLsb == 0x07;
+  const uint16_t id = static_cast<uint16_t>((idMsb << 8) | idLsb);
+  if (idOut) *idOut = id;
+  // SHTC3 IDs vary per unit (e.g. 0x0887); only product-code bits are fixed.
+  return isShtc3ProductId(id);
 }
 }  // namespace
 
@@ -89,15 +95,14 @@ bool sensorInit() {
 
   sensorReady = false;
   for (uint8_t attempt = 0; attempt < 5; ++attempt) {
-    uint8_t idMsb = 0;
-    uint8_t idLsb = 0;
-    if (probeSensor(&idMsb, &idLsb)) {
+    uint16_t id = 0;
+    if (probeSensor(&id)) {
       sensorReady = true;
       Wire.setClock(400000);
-      Serial.println("SHTC3 probe OK");
+      Serial.printf("SHTC3 probe OK (id=0x%04X)\n", id);
       return true;
     }
-    Serial.printf("SHTC3 probe retry %u (id=%02X%02X)\n", attempt + 1, idMsb, idLsb);
+    Serial.printf("SHTC3 probe retry %u (id=0x%04X)\n", attempt + 1, id);
     delay(100);
   }
 
