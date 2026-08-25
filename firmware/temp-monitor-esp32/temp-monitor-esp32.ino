@@ -1,6 +1,6 @@
 /**
  * Temp Monitor — Waveshare ESP32-S3-RLCD-4.2
- * Phase 1: ST7305 display + SHTC3 + battery + NTP hardware verification
+ * Phase 2: 3-day NVS temperature/humidity history (5-min samples)
  */
 
 #define LV_CONF_INCLUDE_SIMPLE
@@ -14,6 +14,7 @@
 #include "config.h"
 #include "display_epaper.h"
 #include "input_buttons.h"
+#include "record_store.h"
 #include "ui_lvgl.h"
 #include "wifi_manager.h"
 
@@ -25,6 +26,7 @@ int8_t lastBatteryPct = -1;
 bool ntpSynced = false;
 bool timeSyncAttempted = false;
 char statusLine[48] = "Starting";
+time_t lastStoredSlot = 0;
 
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
 constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
@@ -32,7 +34,7 @@ constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
 void refreshScreen() {
   if (!displayReady()) return;
   uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
-           statusLine);
+           recordStoreCount(), recordStoreMax(), statusLine);
   displayRefreshFull();
 }
 
@@ -40,7 +42,7 @@ void serviceTick() {
   displayTick();
   if (!displayReady()) return;
   uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
-           statusLine);
+           recordStoreCount(), recordStoreMax(), statusLine);
   displayRefreshFull();
 }
 
@@ -63,6 +65,19 @@ void readSensor() {
     hasSensor = sensorReadyNow();
     Serial.println("Sensor read failed");
   }
+}
+
+void maybeStoreSample() {
+  if (!ntpSynced || !hasSensor) return;
+
+  const time_t now = time(nullptr);
+  if (now < NTP_EPOCH_MIN) return;
+
+  const time_t slot = now - (now % SAMPLE_INTERVAL_SEC);
+  if (slot == lastStoredSlot) return;
+
+  recordStoreAppend(static_cast<uint32_t>(slot), lastTempC, lastHumidity);
+  lastStoredSlot = slot;
 }
 
 bool tryNtpSync() {
@@ -91,6 +106,7 @@ bool tryNtpSync() {
                   timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
                   timeInfo.tm_sec);
     strncpy(statusLine, "NTP synced", sizeof(statusLine) - 1);
+    maybeStoreSample();
   } else {
     Serial.println("NTP sync timeout");
     strncpy(statusLine, "NTP failed", sizeof(statusLine) - 1);
@@ -120,6 +136,7 @@ void handleButton(ButtonEvent event) {
   switch (event) {
     case ButtonEvent::KeyShort:
       readSensor();
+      maybeStoreSample();
       refreshScreen();
       break;
     case ButtonEvent::KeyLong:
@@ -127,9 +144,11 @@ void handleButton(ButtonEvent event) {
       tryNtpSync();
       break;
     case ButtonEvent::BootLong:
-      wifiManagerResetPortal(serviceTick);
-      ntpSynced = false;
-      timeSyncAttempted = false;
+      recordStoreClear();
+      lastStoredSlot = 0;
+      strncpy(statusLine, "History cleared", sizeof(statusLine) - 1);
+      statusLine[sizeof(statusLine) - 1] = '\0';
+      refreshScreen();
       break;
     default:
       break;
@@ -145,12 +164,13 @@ void setup() {
   }
   delay(200);
   Serial.println();
-  Serial.println("=== Temp Monitor Phase 1 boot ===");
+  Serial.println("=== Temp Monitor Phase 2 boot ===");
 
   boardPowerInit();
   delay(100);
 
   inputInit();
+  recordStoreInit();
 
   hasSensor = sensorInit();
   Serial.printf("SHTC3: %s\n", hasSensor ? "OK" : "FAIL");
@@ -192,15 +212,17 @@ void loop() {
   if (millis() - lastSensorMs >= SENSOR_READ_MS) {
     lastSensorMs = millis();
     readSensor();
+    maybeStoreSample();
     refreshScreen();
   }
 
   static uint32_t lastClockMs = 0;
   if (millis() - lastClockMs >= UI_CLOCK_MS) {
     lastClockMs = millis();
+    maybeStoreSample();
     if (displayReady()) {
       uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor,
-               lastBatteryPct, statusLine);
+               lastBatteryPct, recordStoreCount(), recordStoreMax(), statusLine);
       displayRefreshFull();
     }
   }

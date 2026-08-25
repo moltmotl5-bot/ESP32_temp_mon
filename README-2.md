@@ -312,11 +312,13 @@ RAM Ring Buffer（144 筆）          Flash Ring Buffer（864 筆）
 
 ### Phase 2 — 核心功能
 
-- [ ] 實作 `TempRecord` RAM 環形緩衝區（144 筆）
-- [ ] 實作 Flash 持久化（864 筆，NVS 或 LittleFS）
-- [ ] 感測器 60 s 讀取、5 min 寫入 Flash
-- [ ] 3 天資料滾動覆蓋邏輯
-- [ ] 開機載入歷史紀錄至 RAM
+- [x] 實作 `TempRecord` RAM 環形緩衝區（864 筆 NVS + `recordStoreCopyRecent` 供 Phase 3 圖表）
+- [x] 實作 Flash 持久化（864 筆，NVS `temp-mon` namespace）
+- [x] 感測器 60 s 讀取、5 min 寫入 Flash
+- [x] 3 天資料滾動覆蓋邏輯
+- [x] 開機載入歷史紀錄（`recordStoreInit`）
+
+> 狀態列顯示 `Rec:123/864`；**BOOT 長按**清除歷史紀錄
 
 ### Phase 3 — UI 整合
 

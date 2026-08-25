@@ -12,6 +12,13 @@ Shared drivers copied from [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA).
 - [x] NTP time sync (date + clock on screen)
 - [x] WiFiManager captive portal (`TempMon-Setup`)
 
+## Phase 2 checklist
+
+- [x] NVS ring buffer — 864 records × 12 B (~10 KB), 3-day rolling history
+- [x] 5-minute aligned samples (requires NTP)
+- [x] Boot reload from flash; status bar `Rec:N/864`
+- [x] BOOT long press clears history
+
 ## Build
 
 **不要用 `sudo`**。若看到路徑含 `/private/var/root/`，代表用了 root 帳號，請改以一般使用者執行。

@@ -113,7 +113,7 @@ void createMainPanel() {
   lv_label_set_text(humLabel, "--.- %");
 
   lv_obj_t* phase = makeAsciiLabel(panel, 24, 110, 352);
-  lv_label_set_text(phase, "Phase 1: hardware test");
+  lv_label_set_text(phase, "Phase 2: recording");
 }
 
 void createStatusBar() {
@@ -135,7 +135,7 @@ void uiInit() {
 }
 
 void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct, bool hasSensor,
-              int8_t batteryPct, const char* statusLine) {
+              int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, const char* statusLine) {
   updateClockLabels(ntpSynced);
 
   if (batteryLabel) {
@@ -159,9 +159,10 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
   }
 
   if (statusLabel) {
-    char line[96];
-    snprintf(line, sizeof(line), "%s | WiFi:%s | NTP:%s | SHTC3:%s", statusLine ? statusLine : "",
-             wifiConnected ? "OK" : "--", ntpSynced ? "OK" : "--", hasSensor ? "OK" : "ERR");
+    char line[112];
+    snprintf(line, sizeof(line), "%s | WiFi:%s | NTP:%s | SHTC3:%s | Rec:%u/%u",
+             statusLine ? statusLine : "", wifiConnected ? "OK" : "--", ntpSynced ? "OK" : "--",
+             hasSensor ? "OK" : "ERR", recordCount, recordMax);
     lv_label_set_text(statusLabel, line);
   }
 
@@ -169,7 +170,7 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
     if (wifiManagerPortalActive() || !wifiConnected) {
       lv_label_set_text(footerLabel, "Join TempMon-Setup | KEY: setup | BOOT: reset");
     } else {
-      lv_label_set_text(footerLabel, "KEY: read | KEY long: NTP | BOOT long: WiFi reset");
+      lv_label_set_text(footerLabel, "KEY: read | KEY long: NTP | BOOT long: clear");
     }
   }
 }

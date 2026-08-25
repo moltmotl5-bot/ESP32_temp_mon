@@ -4,4 +4,4 @@
 
 void uiInit();
 void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct, bool hasSensor,
-              int8_t batteryPct, const char* statusLine);
+              int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, const char* statusLine);

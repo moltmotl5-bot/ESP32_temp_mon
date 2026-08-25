@@ -35,6 +35,13 @@ constexpr uint32_t SENSOR_READ_MS = 60000;
 constexpr uint32_t BATTERY_READ_MS = 2000;
 constexpr uint32_t UI_CLOCK_MS = 1000;
 
+// Phase 2: 3-day history @ 5-minute intervals
+constexpr uint32_t SAMPLE_INTERVAL_SEC = 300;  // 5 min
+constexpr uint16_t RECORDS_PER_DAY = 288;      // 24 * 60 / 5
+constexpr uint16_t RECORD_DAYS = 3;
+constexpr uint16_t RECORD_MAX = RECORDS_PER_DAY * RECORD_DAYS;  // 864
+constexpr uint16_t CHART_POINTS = 144;         // 12 hours @ 5 min
+
 constexpr const char* WIFI_PORTAL_SSID = "TempMon-Setup";
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_SEC = 20;
 
