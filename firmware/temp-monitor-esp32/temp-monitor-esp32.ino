@@ -16,6 +16,7 @@
 #include "input_buttons.h"
 #include "record_store.h"
 #include "sd_logger.h"
+#include "time_keeper.h"
 #include "ui_lvgl.h"
 #include "wifi_manager.h"
 
@@ -30,16 +31,10 @@ char statusLine[48] = "Starting";
 time_t lastStoredSlot = 0;
 
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
-constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
-
-bool timeIsValid() {
-  const time_t now = time(nullptr);
-  return now >= static_cast<time_t>(NTP_EPOCH_MIN);
-}
 
 void refreshScreen() {
   if (!displayReady()) return;
-  uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
+  uiUpdate(wifiManagerIsConnected(), timeKeeperIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
            recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
@@ -47,7 +42,7 @@ void refreshScreen() {
 void serviceTick() {
   displayTick();
   if (!displayReady()) return;
-  uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
+  uiUpdate(wifiManagerIsConnected(), timeKeeperIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
            recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
@@ -74,7 +69,7 @@ void readSensor() {
 }
 
 void maybeStoreSample() {
-  if (!hasSensor || !timeIsValid()) return;
+  if (!hasSensor || !timeKeeperIsValid()) return;
 
   const time_t now = time(nullptr);
   const time_t slot = now - (now % SAMPLE_INTERVAL_SEC);
@@ -82,6 +77,7 @@ void maybeStoreSample() {
 
   recordStoreAppend(static_cast<uint32_t>(slot), lastTempC, lastHumidity);
   lastStoredSlot = slot;
+  timeKeeperPersist();
   uiRefreshChart();
 }
 
@@ -97,12 +93,12 @@ bool tryNtpSync() {
 
   configTime(TIMEZONE_OFFSET_SEC, 0, NTP_SERVER_1, NTP_SERVER_2);
   const uint32_t start = millis();
-  while (time(nullptr) < NTP_EPOCH_MIN && millis() - start < 15000) {
+  while (!timeKeeperIsValid() && millis() - start < 15000) {
     wifiManagerLoop(serviceTick);
     delay(250);
   }
 
-  ntpSynced = timeIsValid();
+  ntpSynced = timeKeeperIsValid();
   if (ntpSynced) {
     struct tm timeInfo {};
     const time_t now = time(nullptr);
@@ -110,6 +106,7 @@ bool tryNtpSync() {
     Serial.printf("NTP synced: %04d-%02d-%02d %02d:%02d:%02d\n", timeInfo.tm_year + 1900,
                   timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
                   timeInfo.tm_sec);
+    timeKeeperPersist();
     strncpy(statusLine, "NTP synced", sizeof(statusLine) - 1);
     maybeStoreSample();
   } else {
@@ -187,6 +184,7 @@ void setup() {
 
   inputInit();
   recordStoreInit();
+  timeKeeperInit();
   sdLoggerInit();
 
   hasSensor = sensorInit();
@@ -239,8 +237,9 @@ void loop() {
   if (millis() - lastClockMs >= UI_CLOCK_MS) {
     lastClockMs = millis();
     maybeStoreSample();
+    timeKeeperTick();
     if (displayReady()) {
-      uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor,
+      uiUpdate(wifiManagerIsConnected(), timeKeeperIsValid(), lastTempC, lastHumidity, hasSensor,
                lastBatteryPct, recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
       displayRefreshFull();
     }
@@ -257,7 +256,7 @@ void loop() {
       if (disconnectedSinceMs == 0) {
         disconnectedSinceMs = millis();
         timeSyncAttempted = false;
-        if (timeIsValid()) {
+        if (timeKeeperIsValid()) {
           strncpy(statusLine, "Offline logging", sizeof(statusLine) - 1);
         } else {
           strncpy(statusLine, "No WiFi", sizeof(statusLine) - 1);
