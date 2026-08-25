@@ -30,6 +30,7 @@ Shared drivers copied from [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA).
 - [x] Append CSV on every 5-min sample: `/sdcard/temp_log.csv`
 - [x] Columns: `timestamp,datetime,temp_c,humidity_pct`
 - [x] Graceful fallback when no card; status bar shows `SD:OK` / `SD:--`
+- [x] WiFi 斷線後仍用內建時鐘繼續寫 NVS + SD（NTP 顯示 `loc`）
 
 Insert a FAT32 microSD (≤32 GB recommended). Remove the card on a PC to read `temp_log.csv`.
 
