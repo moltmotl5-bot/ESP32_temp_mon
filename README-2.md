@@ -302,11 +302,13 @@ RAM Ring Buffer（144 筆）          Flash Ring Buffer（864 筆）
 
 ### Phase 1 — 硬體驗證
 
-- [ ] Arduino CLI 專案初始化（ESP32-S3 + OPI PSRAM + 16 MB）
-- [ ] 移植 ST7305 驅動與 LVGL flush（自 ETA App）
-- [ ] SHTC3 讀取測試（Serial 輸出溫濕度）
-- [ ] 電源保持（GPIO17 HIGH）+ 電池 ADC 測試
-- [ ] NTP 時間同步測試
+- [x] Arduino CLI 專案初始化（ESP32-S3 + OPI PSRAM + 16 MB）
+- [x] 移植 ST7305 驅動與 LVGL flush（自 BUS-ETA）
+- [x] SHTC3 讀取測試（Serial + 螢幕顯示溫濕度）
+- [x] 電源保持（GPIO17 HIGH）+ 電池 ADC 測試
+- [x] NTP 時間同步測試（螢幕顯示日期時間）
+
+> 韌體路徑：`firmware/temp-monitor-esp32/` | 建置：`cd firmware && ./build.sh`
 
 ### Phase 2 — 核心功能
 
