@@ -12,12 +12,12 @@ Shared drivers copied from [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA).
 - [x] NTP time sync (date + clock on screen)
 - [x] WiFiManager captive portal (`TempMon-Setup`)
 
-## Phase 2 checklist
+## Phase 3 checklist
 
-- [x] NVS ring buffer — 864 records × 12 B (~10 KB), 3-day rolling history
-- [x] 5-minute aligned samples (requires NTP)
-- [x] Boot reload from flash; status bar `Rec:N/864`
-- [x] BOOT long press clears history
+- [x] `lv_chart` 12-hour temperature line graph (144 points from NVS)
+- [x] Compact dashboard layout on 400×300 RLCD
+- [x] Y-axis auto-scale or fixed 15–35°C (BOOT short toggle)
+- [x] Chart refreshes on sample save and every 60s sensor read
 
 ## Build
 

@@ -1,6 +1,6 @@
 /**
  * Temp Monitor — Waveshare ESP32-S3-RLCD-4.2
- * Phase 2: 3-day NVS temperature/humidity history (5-min samples)
+ * Phase 3: 12-hour temperature chart + full dashboard UI
  */
 
 #define LV_CONF_INCLUDE_SIMPLE
@@ -78,6 +78,7 @@ void maybeStoreSample() {
 
   recordStoreAppend(static_cast<uint32_t>(slot), lastTempC, lastHumidity);
   lastStoredSlot = slot;
+  uiRefreshChart();
 }
 
 bool tryNtpSync() {
@@ -137,15 +138,26 @@ void handleButton(ButtonEvent event) {
     case ButtonEvent::KeyShort:
       readSensor();
       maybeStoreSample();
+      uiRefreshChart();
       refreshScreen();
       break;
     case ButtonEvent::KeyLong:
       timeSyncAttempted = false;
       tryNtpSync();
       break;
+    case ButtonEvent::BootShort:
+      if (uiToggleChartYAxis()) {
+        strncpy(statusLine, "Chart Y: auto", sizeof(statusLine) - 1);
+      } else {
+        strncpy(statusLine, "Chart Y: 15-35C", sizeof(statusLine) - 1);
+      }
+      statusLine[sizeof(statusLine) - 1] = '\0';
+      refreshScreen();
+      break;
     case ButtonEvent::BootLong:
       recordStoreClear();
       lastStoredSlot = 0;
+      uiRefreshChart();
       strncpy(statusLine, "History cleared", sizeof(statusLine) - 1);
       statusLine[sizeof(statusLine) - 1] = '\0';
       refreshScreen();
@@ -164,7 +176,7 @@ void setup() {
   }
   delay(200);
   Serial.println();
-  Serial.println("=== Temp Monitor Phase 2 boot ===");
+  Serial.println("=== Temp Monitor Phase 3 boot ===");
 
   boardPowerInit();
   delay(100);
@@ -179,6 +191,7 @@ void setup() {
     Serial.println("Display init failed — rebuild with PSRAM=opi (see firmware/build.sh)");
   } else {
     uiInit();
+    uiRefreshChart();
     Serial.println("Display OK");
   }
 
@@ -213,6 +226,7 @@ void loop() {
     lastSensorMs = millis();
     readSensor();
     maybeStoreSample();
+    uiRefreshChart();
     refreshScreen();
   }
 
