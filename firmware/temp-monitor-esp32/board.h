@@ -7,3 +7,4 @@ bool batteryInit();
 bool batteryRead(uint8_t* pctOut);
 bool sensorInit();
 bool sensorRead(float* tempC, float* humidityPct);
+bool sensorReadyNow();

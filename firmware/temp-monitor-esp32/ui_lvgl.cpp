@@ -16,7 +16,10 @@ lv_obj_t* humLabel = nullptr;
 lv_obj_t* statusLabel = nullptr;
 lv_obj_t* footerLabel = nullptr;
 
-const lv_font_t* fontUi() { return &font_source_han_sans_18; }
+// Font subset copied from BUS-ETA — only covers ETA-app glyphs.
+// Use Montserrat for ASCII; use CJK font only for chars known to exist.
+const lv_font_t* fontAscii() { return &lv_font_montserrat_14; }
+const lv_font_t* fontCjk() { return &font_source_han_sans_18; }
 
 const char* batterySymbol(int8_t batteryPct) {
   if (batteryPct < 0) return LV_SYMBOL_BATTERY_EMPTY;
@@ -40,13 +43,13 @@ void stylePanel(lv_obj_t* obj, bool inverted) {
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
-lv_obj_t* makeLabel(lv_obj_t* parent, int x, int y, int w, bool whiteText) {
+lv_obj_t* makeAsciiLabel(lv_obj_t* parent, int x, int y, int w) {
   lv_obj_t* label = lv_label_create(parent);
   lv_obj_set_pos(label, x, y);
   lv_obj_set_width(label, w);
   lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
-  lv_obj_set_style_text_font(label, fontUi(), 0);
-  setTextColor(label, whiteText);
+  lv_obj_set_style_text_font(label, fontAscii(), 0);
+  setTextColor(label, false);
   return label;
 }
 
@@ -74,19 +77,19 @@ void createHeader() {
   lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* title = lv_label_create(header);
-  lv_label_set_text(title, "溫濕度");
-  lv_obj_set_style_text_font(title, fontUi(), 0);
+  lv_label_set_text(title, "Temp Mon");
+  lv_obj_set_style_text_font(title, fontAscii(), 0);
   setTextColor(title, false);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 6, 0);
 
   batteryLabel = lv_label_create(header);
   lv_label_set_text(batteryLabel, LV_SYMBOL_BATTERY_FULL);
-  lv_obj_set_style_text_font(batteryLabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(batteryLabel, fontAscii(), 0);
   setTextColor(batteryLabel, false);
   lv_obj_align(batteryLabel, LV_ALIGN_RIGHT_MID, -4, 0);
 
-  dateLabel = makeLabel(header, 72, 2, 120, false);
-  timeLabel = makeLabel(header, 196, 2, 100, false);
+  dateLabel = makeAsciiLabel(header, 88, 2, 110);
+  timeLabel = makeAsciiLabel(header, 200, 2, 96);
   lv_obj_set_style_text_align(timeLabel, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
@@ -97,35 +100,25 @@ void createMainPanel() {
   stylePanel(panel, false);
   lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t* tempTitle = makeLabel(panel, 24, 16, 140, false);
-  lv_label_set_text(tempTitle, "溫度");
+  lv_obj_t* tempTitle = makeAsciiLabel(panel, 24, 16, 140);
+  lv_label_set_text(tempTitle, "Temp");
 
-  tempLabel = makeLabel(panel, 24, 44, 160, false);
+  tempLabel = makeAsciiLabel(panel, 24, 44, 160);
   lv_label_set_text(tempLabel, "--.- C");
-  lv_obj_set_style_text_font(tempLabel, &lv_font_montserrat_14, 0);
 
-  lv_obj_t* humTitle = makeLabel(panel, 220, 16, 140, false);
-  lv_label_set_text(humTitle, "濕度");
+  lv_obj_t* humTitle = makeAsciiLabel(panel, 220, 16, 140);
+  lv_label_set_text(humTitle, "Humidity");
 
-  humLabel = makeLabel(panel, 220, 44, 160, false);
+  humLabel = makeAsciiLabel(panel, 220, 44, 160);
   lv_label_set_text(humLabel, "--.- %");
-  lv_obj_set_style_text_font(humLabel, &lv_font_montserrat_14, 0);
 
-  lv_obj_t* phase = makeLabel(panel, 24, 110, 352, false);
-  lv_label_set_text(phase, "Phase 1: 硬體驗證");
+  lv_obj_t* phase = makeAsciiLabel(panel, 24, 110, 352);
+  lv_label_set_text(phase, "Phase 1: hardware test");
 }
 
 void createStatusBar() {
-  statusLabel = lv_label_create(lv_scr_act());
-  lv_obj_set_width(statusLabel, SCREEN_W - 12);
-  lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_CLIP);
-  lv_obj_set_style_text_font(statusLabel, fontUi(), 0);
-  setTextColor(statusLabel, false);
-  lv_obj_align(statusLabel, LV_ALIGN_TOP_MID, 0, 224);
-
-  footerLabel = lv_label_create(lv_scr_act());
-  lv_obj_set_style_text_font(footerLabel, fontUi(), 0);
-  setTextColor(footerLabel, false);
+  statusLabel = makeAsciiLabel(lv_scr_act(), 6, 224, SCREEN_W - 12);
+  footerLabel = makeAsciiLabel(lv_scr_act(), 0, 0, SCREEN_W - 8);
   lv_obj_align(footerLabel, LV_ALIGN_BOTTOM_MID, 0, -2);
 }
 }  // namespace
@@ -174,9 +167,9 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
 
   if (footerLabel) {
     if (wifiManagerPortalActive() || !wifiConnected) {
-      lv_label_set_text(footerLabel, "連 TempMon-Setup  長KEY:設定  長BOOT:重設");
+      lv_label_set_text(footerLabel, "Join TempMon-Setup | KEY: setup | BOOT: reset");
     } else {
-      lv_label_set_text(footerLabel, "短KEY:讀感測  長KEY:NTP同步  長BOOT:WiFi重設");
+      lv_label_set_text(footerLabel, "KEY: read | KEY long: NTP | BOOT long: WiFi reset");
     }
   }
 }

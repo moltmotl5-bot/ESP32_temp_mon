@@ -24,7 +24,7 @@ bool hasSensor = false;
 int8_t lastBatteryPct = -1;
 bool ntpSynced = false;
 bool timeSyncAttempted = false;
-char statusLine[48] = "啟動中";
+char statusLine[48] = "Starting";
 
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
 constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
@@ -60,6 +60,7 @@ void readSensor() {
     hasSensor = true;
     Serial.printf("Sensor: %.1f C, %.1f %%RH\n", temp, hum);
   } else {
+    hasSensor = sensorReadyNow();
     Serial.println("Sensor read failed");
   }
 }
@@ -68,7 +69,7 @@ bool tryNtpSync() {
   if (!wifiManagerIsConnected()) return false;
 
   if (!wifiManagerWaitForNetwork(8000, serviceTick)) {
-    strncpy(statusLine, "無DNS", sizeof(statusLine) - 1);
+    strncpy(statusLine, "No DNS", sizeof(statusLine) - 1);
     statusLine[sizeof(statusLine) - 1] = '\0';
     refreshScreen();
     return false;
@@ -89,10 +90,10 @@ bool tryNtpSync() {
     Serial.printf("NTP synced: %04d-%02d-%02d %02d:%02d:%02d\n", timeInfo.tm_year + 1900,
                   timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
                   timeInfo.tm_sec);
-    strncpy(statusLine, "NTP已同步", sizeof(statusLine) - 1);
+    strncpy(statusLine, "NTP synced", sizeof(statusLine) - 1);
   } else {
     Serial.println("NTP sync timeout");
-    strncpy(statusLine, "NTP失敗", sizeof(statusLine) - 1);
+    strncpy(statusLine, "NTP failed", sizeof(statusLine) - 1);
   }
   statusLine[sizeof(statusLine) - 1] = '\0';
   refreshScreen();
@@ -147,7 +148,12 @@ void setup() {
   Serial.println("=== Temp Monitor Phase 1 boot ===");
 
   boardPowerInit();
+  delay(100);
+
   inputInit();
+
+  hasSensor = sensorInit();
+  Serial.printf("SHTC3: %s\n", hasSensor ? "OK" : "FAIL");
 
   if (!displayInit()) {
     Serial.println("Display init failed — rebuild with PSRAM=opi (see firmware/build.sh)");
@@ -155,9 +161,6 @@ void setup() {
     uiInit();
     Serial.println("Display OK");
   }
-
-  hasSensor = sensorInit();
-  Serial.printf("SHTC3: %s\n", hasSensor ? "OK" : "FAIL");
 
   batteryInit();
   readBattery();
@@ -167,7 +170,7 @@ void setup() {
     readSensor();
   }
 
-  strncpy(statusLine, "連線中", sizeof(statusLine) - 1);
+  strncpy(statusLine, "Connecting", sizeof(statusLine) - 1);
   statusLine[sizeof(statusLine) - 1] = '\0';
   refreshScreen();
 
@@ -214,7 +217,7 @@ void loop() {
         disconnectedSinceMs = millis();
         ntpSynced = false;
         timeSyncAttempted = false;
-        strncpy(statusLine, "無WiFi", sizeof(statusLine) - 1);
+        strncpy(statusLine, "No WiFi", sizeof(statusLine) - 1);
         statusLine[sizeof(statusLine) - 1] = '\0';
       } else if (millis() - disconnectedSinceMs >= WIFI_DISCONNECT_PORTAL_MS) {
         disconnectedSinceMs = 0;
@@ -225,12 +228,21 @@ void loop() {
     }
   } else {
     disconnectedSinceMs = 0;
-    strncpy(statusLine, "WiFi設定", sizeof(statusLine) - 1);
+    strncpy(statusLine, "WiFi setup", sizeof(statusLine) - 1);
     statusLine[sizeof(statusLine) - 1] = '\0';
   }
 
   if (const ButtonEvent event = inputPoll(); event != ButtonEvent::None) {
     handleButton(event);
+  }
+
+  static uint32_t lastSensorRetryMs = 0;
+  if (!hasSensor && millis() - lastSensorRetryMs >= 30000) {
+    lastSensorRetryMs = millis();
+    if (sensorInit()) {
+      readSensor();
+      refreshScreen();
+    }
   }
 
   delay(5);

@@ -17,15 +17,17 @@ bool writeCommand(uint16_t cmd) {
   return Wire.endTransmission() == 0;
 }
 
-bool probeSensor() {
+bool probeSensor(uint8_t* idMsbOut = nullptr, uint8_t* idLsbOut = nullptr) {
   if (!writeCommand(0x3517)) return false;  // wake
-  delay(1);
+  delay(2);
   if (!writeCommand(0xEFC8)) return false;  // read ID
   if (Wire.requestFrom(SHTC3_ADDR, static_cast<uint8_t>(3)) != 3) return false;
   const uint8_t idMsb = Wire.read();
   const uint8_t idLsb = Wire.read();
   Wire.read();  // CRC
   writeCommand(0xB098);  // sleep
+  if (idMsbOut) *idMsbOut = idMsb;
+  if (idLsbOut) *idLsbOut = idLsb;
   return idMsb == 0x08 && idLsb == 0x07;
 }
 }  // namespace
@@ -82,17 +84,36 @@ bool batteryRead(uint8_t* pctOut) {
 
 bool sensorInit() {
   Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(100000);
+  delay(50);  // allow SHTC3 to stabilize after power hold
+
+  sensorReady = false;
+  for (uint8_t attempt = 0; attempt < 5; ++attempt) {
+    uint8_t idMsb = 0;
+    uint8_t idLsb = 0;
+    if (probeSensor(&idMsb, &idLsb)) {
+      sensorReady = true;
+      Wire.setClock(400000);
+      Serial.println("SHTC3 probe OK");
+      return true;
+    }
+    Serial.printf("SHTC3 probe retry %u (id=%02X%02X)\n", attempt + 1, idMsb, idLsb);
+    delay(100);
+  }
+
   Wire.setClock(400000);
-  sensorReady = probeSensor();
-  return sensorReady;
+  Serial.println("SHTC3 probe FAILED");
+  return false;
 }
 
 bool sensorRead(float* tempC, float* humidityPct) {
-  if (!sensorReady || !tempC || !humidityPct) return false;
+  if (!tempC || !humidityPct) return false;
+
+  if (!sensorReady && !sensorInit()) return false;
 
   if (!writeCommand(0x3517)) return false;  // wake
-  delay(1);
-  if (!writeCommand(0x7CA2)) return false;  // measure T first, normal mode
+  delay(2);
+  if (!writeCommand(0x7CA2)) return false;  // measure T first, normal mode (same as BUS-ETA)
   delay(15);
 
   if (Wire.requestFrom(SHTC3_ADDR, static_cast<uint8_t>(6)) != 6) {
@@ -111,3 +132,5 @@ bool sensorRead(float* tempC, float* humidityPct) {
   *humidityPct = 100.0f * (static_cast<float>(rawHum) / 65535.0f);
   return true;
 }
+
+bool sensorReadyNow() { return sensorReady; }
