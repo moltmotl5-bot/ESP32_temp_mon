@@ -32,9 +32,14 @@ time_t lastStoredSlot = 0;
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
 constexpr uint32_t NTP_EPOCH_MIN = 1700000000;
 
+bool timeIsValid() {
+  const time_t now = time(nullptr);
+  return now >= static_cast<time_t>(NTP_EPOCH_MIN);
+}
+
 void refreshScreen() {
   if (!displayReady()) return;
-  uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
+  uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
            recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
@@ -42,7 +47,7 @@ void refreshScreen() {
 void serviceTick() {
   displayTick();
   if (!displayReady()) return;
-  uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor, lastBatteryPct,
+  uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor, lastBatteryPct,
            recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
   displayRefreshFull();
 }
@@ -69,11 +74,9 @@ void readSensor() {
 }
 
 void maybeStoreSample() {
-  if (!ntpSynced || !hasSensor) return;
+  if (!hasSensor || !timeIsValid()) return;
 
   const time_t now = time(nullptr);
-  if (now < NTP_EPOCH_MIN) return;
-
   const time_t slot = now - (now % SAMPLE_INTERVAL_SEC);
   if (slot == lastStoredSlot) return;
 
@@ -99,7 +102,7 @@ bool tryNtpSync() {
     delay(250);
   }
 
-  ntpSynced = time(nullptr) >= NTP_EPOCH_MIN;
+  ntpSynced = timeIsValid();
   if (ntpSynced) {
     struct tm timeInfo {};
     const time_t now = time(nullptr);
@@ -237,7 +240,7 @@ void loop() {
     lastClockMs = millis();
     maybeStoreSample();
     if (displayReady()) {
-      uiUpdate(wifiManagerIsConnected(), ntpSynced, lastTempC, lastHumidity, hasSensor,
+      uiUpdate(wifiManagerIsConnected(), timeIsValid(), lastTempC, lastHumidity, hasSensor,
                lastBatteryPct, recordStoreCount(), recordStoreMax(), sdLoggerReady(), statusLine);
       displayRefreshFull();
     }
@@ -253,15 +256,21 @@ void loop() {
     if (!wifiManagerIsConnected()) {
       if (disconnectedSinceMs == 0) {
         disconnectedSinceMs = millis();
-        ntpSynced = false;
         timeSyncAttempted = false;
-        strncpy(statusLine, "No WiFi", sizeof(statusLine) - 1);
+        if (timeIsValid()) {
+          strncpy(statusLine, "Offline logging", sizeof(statusLine) - 1);
+        } else {
+          strncpy(statusLine, "No WiFi", sizeof(statusLine) - 1);
+        }
         statusLine[sizeof(statusLine) - 1] = '\0';
       } else if (millis() - disconnectedSinceMs >= WIFI_DISCONNECT_PORTAL_MS) {
         disconnectedSinceMs = 0;
         wifiManagerStartPortal(serviceTick);
       }
     } else {
+      if (disconnectedSinceMs != 0) {
+        timeSyncAttempted = false;
+      }
       disconnectedSinceMs = 0;
     }
   } else {

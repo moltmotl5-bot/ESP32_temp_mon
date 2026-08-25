@@ -76,12 +76,12 @@ lv_obj_t* makeAsciiLabel(lv_obj_t* parent, int x, int y, int w) {
   return label;
 }
 
-void updateClockLabel(bool ntpSynced) {
+void updateClockLabel(bool timeValid) {
   if (!clockLabel) return;
 
   const time_t now = time(nullptr);
   struct tm timeInfo {};
-  if (ntpSynced && now >= 1700000000 && localtime_r(&now, &timeInfo)) {
+  if (timeValid && localtime_r(&now, &timeInfo)) {
     lv_label_set_text_fmt(clockLabel, "%04d-%02d-%02d %02d:%02d:%02d", timeInfo.tm_year + 1900,
                           timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
                           timeInfo.tm_sec);
@@ -309,10 +309,10 @@ bool uiToggleChartYAxis() {
   return chartYAuto;
 }
 
-void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct, bool hasSensor,
+void uiUpdate(bool wifiConnected, bool timeValid, float tempC, float humidityPct, bool hasSensor,
               int8_t batteryPct, uint16_t recordCount, uint16_t recordMax, bool sdReady,
               const char* statusLine) {
-  updateClockLabel(ntpSynced);
+  updateClockLabel(timeValid);
 
   if (wifiLabel) {
     if (wifiManagerPortalActive()) {
@@ -350,8 +350,9 @@ void uiUpdate(bool wifiConnected, bool ntpSynced, float tempC, float humidityPct
 
   if (statusDetailLabel) {
     char line[80];
-    snprintf(line, sizeof(line), "NTP:%s  SD:%s  SHTC3:%s  Rec:%u/%u", ntpSynced ? "OK" : "--",
-             sdReady ? "OK" : "--", hasSensor ? "OK" : "ERR", recordCount, recordMax);
+    snprintf(line, sizeof(line), "NTP:%s  SD:%s  SHTC3:%s  Rec:%u/%u",
+             timeValid ? (wifiConnected ? "OK" : "loc") : "--", sdReady ? "OK" : "--",
+             hasSensor ? "OK" : "ERR", recordCount, recordMax);
     lv_label_set_text(statusDetailLabel, line);
   }
 
