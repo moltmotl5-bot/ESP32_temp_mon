@@ -2,7 +2,9 @@
 
 > **專案目標**：在 **Waveshare ESP32-S3-RLCD-4.2** 開發板上建置即時溫濕度監控器，於 4.2" 反射式 LCD 顯示日期、時間、當前溫濕度，並以折線圖呈現過去 12 小時溫度趨勢，同時在模組內部儲存過去 3 天的歷史紀錄。
 
-> 硬體規格參考：[HW_spec_ref.md](./HW_spec_ref.md)（Waveshare ESP32-S3-RLCD-4.2）
+> **上游韌體 repo**：[BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA) — 同一塊 Waveshare 板子的 ETA App，已實作好 ST7305 顯示、SHTC3 感測、LVGL、WiFiManager、電池等底層模組，本專案直接調用，無需從零撰寫。
+>
+> 硬體規格參考：[HW_spec_ref.md](./HW_spec_ref.md)（摘錄自 BUS-ETA）
 
 ---
 
@@ -137,22 +139,33 @@ Waveshare ESP32-S3-RLCD-4.2
 
 ### 3.2 專案目錄結構
 
+本 repo（`ESP32_temp_mon`）新增溫濕度監控韌體；底層驅動從 [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA) 複製或 submodule 引用。
+
 ```
-firmware/temp-monitor-esp32/
-├── temp-monitor-esp32.ino   # 主程式、FreeRTOS 任務調度
-├── config.h                 # 接腳、取樣間隔、NTP 設定
-├── st7305_display.cpp       # ST7305 驅動（可從 ETA App 移植）
-├── display_lvgl.cpp           # LVGL flush → ST7305
-├── ui_lvgl.cpp                # 溫濕度監控 UI（日期、數值、折線圖）
-├── board.cpp                  # 電源保持 + SHTC3 讀取
-├── shtc3_sensor.cpp           # SHTC3 I²C 驅動
-├── clock_manager.cpp          # NTP 同步 + 軟體時鐘
-├── record_store.cpp           # 3 天環形緩衝區（NVS / LittleFS）
-├── input_buttons.cpp          # BOOT / KEY 按鈕處理
-├── battery.cpp                # GPIO4 ADC 電池電量
-├── lv_conf.h                  # LVGL 1-bit monochrome 設定
-└── build.sh                   # Arduino CLI 建置腳本
+ESP32_temp_mon/
+├── README-2.md                          # 本計畫
+├── HW_spec_ref.md                       # 硬體規格摘要
+└── firmware/
+    ├── build.sh                         # 改 SKETCH=temp-monitor-esp32（自 BUS-ETA 複製）
+    ├── arduino-cli.yaml                 # 自 BUS-ETA 複製
+    └── temp-monitor-esp32/
+        ├── temp-monitor-esp32.ino       # ★ 新建：主程式（參考 eta-app-esp32.ino 骨架）
+        ├── config.h                     # ★ 新建：自 BUS-ETA config.h 精簡（移除 ETA 專用常數）
+        ├── ui_lvgl.cpp / .h             # ★ 新建：溫濕度 UI + lv_chart 折線圖
+        ├── record_store.cpp / .h        # ★ 新建：3 天環形緩衝區（參考 app_state.cpp NVS 模式）
+        │
+        │  ── 以下直接從 BUS-ETA 複製，原封不動 ──
+        ├── st7305_display.cpp / .h      # BUS-ETA: firmware/eta-app-esp32/
+        ├── display_epaper.cpp / .h      # BUS-ETA: LVGL flush → ST7305
+        ├── board.cpp / .h               # BUS-ETA: 電源保持 + SHTC3 + 電池 ADC
+        ├── input_buttons.cpp / .h       # BUS-ETA: BOOT / KEY 處理
+        ├── wifi_manager.cpp / .h        # BUS-ETA: WiFiManager captive portal
+        ├── lv_conf.h                    # BUS-ETA: LVGL 1-bit monochrome
+        ├── lvgl_setup.h                 # BUS-ETA
+        └── font_source_han_sans_18.c/.h # BUS-ETA: 中文字型
 ```
+
+> **不複製**的 BUS-ETA 模組（與溫濕度監控無關）：`mtr_api.*`、`kmb_api.*`、`eta_api.*`、`app_state.*`、`stops.h`
 
 ### 3.3 FreeRTOS 任務分工
 
@@ -330,9 +343,31 @@ RAM Ring Buffer（144 筆）          Flash Ring Buffer（864 筆）
 
 ## 8. 建置與燒錄
 
-### 8.1 Arduino CLI 建置
+### 8.1 初始化（從 BUS-ETA 取得共用模組）
 
 ```bash
+# 1. Clone BUS-ETA（若尚未有）
+git clone https://github.com/moltmotl5-bot/BUS-ETA.git /tmp/BUS-ETA
+
+# 2. 複製共用韌體檔案至本專案
+SRC=/tmp/BUS-ETA/firmware/eta-app-esp32
+DST=firmware/temp-monitor-esp32
+mkdir -p "$DST"
+for f in st7305_display display_epaper board input_buttons wifi_manager \
+         lv_conf lvgl_setup font_source_han_sans_18; do
+  cp "$SRC/${f}.cpp" "$SRC/${f}.h" "$DST/" 2>/dev/null || \
+  cp "$SRC/${f}.c"  "$SRC/${f}.h" "$DST/" 2>/dev/null || true
+done
+cp /tmp/BUS-ETA/firmware/build.sh /tmp/BUS-ETA/firmware/arduino-cli.yaml firmware/
+
+# 3. 修改 firmware/build.sh 的 SKETCH 變數
+#    SKETCH="temp-monitor-esp32"
+```
+
+### 8.2 Arduino CLI 建置
+
+```bash
+cd firmware
 chmod +x build.sh
 ./build.sh
 
@@ -340,7 +375,7 @@ chmod +x build.sh
 PORT=/dev/ttyACM0 ./build.sh
 ```
 
-### 8.2 板子設定
+### 8.3 板子設定
 
 | 設定 | 值 |
 |------|-----|
@@ -358,7 +393,7 @@ PORT=/dev/ttyACM0 ./build.sh
 esp32:esp32:esp32s3:PartitionScheme=huge_app,PSRAM=opi,FlashSize=16M,FlashMode=qio,CDCOnBoot=cdc
 ```
 
-### 8.3 依賴函式庫
+### 8.4 依賴函式庫
 
 | 函式庫 | 版本 | 用途 |
 |--------|------|------|
@@ -395,29 +430,111 @@ SHTC3 以 raw I²C 讀取，**無需額外感測器函式庫**（可移植 ETA A
 
 ---
 
-## 11. 與 ETA App 的共用資源
+## 11. 從 BUS-ETA 調用已有模組
 
-本專案與現有 [HW_spec_ref.md](./HW_spec_ref.md) 中的 ETA App 共用同一塊 **Waveshare ESP32-S3-RLCD-4.2**，可直接移植：
+> Repo：[https://github.com/moltmotl5-bot/BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA)
+>
+> 路徑前綴：`firmware/eta-app-esp32/`
 
-| 模組 | 來源 | 用途 |
-|------|------|------|
-| `st7305_display.cpp` | ETA App | ST7305 SPI 驅動 |
-| `display_epaper.cpp` → `display_lvgl.cpp` | ETA App | LVGL flush callback |
-| `board.cpp` | ETA App | 電源保持 + SHTC3 I²C |
-| `input_buttons.cpp` | ETA App | BOOT / KEY 處理 |
-| `battery.cpp` | ETA App | GPIO4 ADC 電量 |
-| `lv_conf.h` | ETA App | 1-bit monochrome LVGL 設定 |
-| `font_source_han_sans_18.c` | ETA App | 中文顯示 |
+### 11.1 可直接複製（零修改或僅改 config.h）
+
+| BUS-ETA 檔案 | 功能 | 本專案用途 |
+|-------------|------|-----------|
+| `st7305_display.cpp/.h` | ST7305 SPI 驅動、framebuffer、像素繪製 | 顯示硬體層，**原封不動** |
+| `display_epaper.cpp/.h` | LVGL init、flush callback、`displayTick()` | LVGL ↔ ST7305 橋接，**原封不動** |
+| `board.cpp/.h` | `boardPowerInit()`、`sensorInit/Read()`、`batteryInit/Read()` | SHTC3 + 電池 + 電源保持，**原封不動** |
+| `input_buttons.cpp/.h` | BOOT/KEY 短按、長按、組合鍵偵測 | 按鈕輸入，**原封不動**（僅改事件對應動作） |
+| `wifi_manager.cpp/.h` | WiFiManager captive portal、連線管理 | Wi-Fi 設定，**原封不動**（改 portal SSID 名稱） |
+| `lv_conf.h` | LVGL 1-bit 單色、記憶體配置 | LVGL 設定，**原封不動** |
+| `lvgl_setup.h` | LVGL header 統一引入 | **原封不動** |
+| `font_source_han_sans_18.c/.h` | Source Han Sans CN Bold 18 px | 中文 UI 字型，**原封不動** |
+| `config.h` | GPIO 接腳、螢幕尺寸、電池常數 | **精簡複製**（移除 `MTR_API_URL`、`MAX_ROUTES` 等 ETA 常數） |
+| `firmware/build.sh` | Arduino CLI 建置 + LVGL 8.3.11 鎖版 | 改 `SKETCH=temp-monitor-esp32` |
+| `firmware/arduino-cli.yaml` | Arduino CLI 設定 | **原封不動** |
+
+### 11.2 參考實作（複製骨架後改寫）
+
+| BUS-ETA 檔案 | 參考內容 | 本專案對應 |
+|-------------|---------|-----------|
+| `eta-app-esp32.ino` | 開機流程、`waitForTimeSync()`、`readSensor()`、`uiTick()` 主迴圈 | → `temp-monitor-esp32.ino` |
+| `ui_lvgl.cpp` | `stylePanel()`、`makeLabel()`、`createBatteryIcon()`、`batterySymbol()` | → 新 UI：日期時間、溫濕度大字、`lv_chart` |
+| `app_state.cpp` | `Preferences` NVS 讀寫模式（`prefs.begin("eta-app")`） | → `record_store.cpp`（namespace 改 `temp-mon`） |
+
+### 11.3 BUS-ETA 中可重用的程式片段
+
+**NTP 時間同步**（摘自 `eta-app-esp32.ino`）：
+
+```cpp
+void waitForTimeSync() {
+  configTime(8 * 3600, 0, "pool.ntp.org", "time.google.com");
+  const uint32_t start = millis();
+  while (time(nullptr) < 1700000000 && millis() - start < 15000) {
+    wifiManagerLoop(uiTick);
+    delay(250);
+  }
+}
+```
+
+**SHTC3 讀取**（已在 `board.cpp`，直接呼叫）：
+
+```cpp
+float tempC, humidityPct;
+if (sensorRead(&tempC, &humidityPct)) { /* 更新 UI + 寫入 record_store */ }
+```
+
+**NVS 環形緩衝區**（參考 `app_state.cpp` 的 `Preferences` 模式）：
+
+```cpp
+// record_store.cpp — 沿用 BUS-ETA 的 Preferences 寫法
+Preferences prefs;
+prefs.begin("temp-mon", false);
+prefs.putBytes("records", buffer, sizeof(buffer));
+prefs.putUInt("head", headIndex);
+prefs.end();
+```
+
+**電池 icon**（摘自 `ui_lvgl.cpp`）：
+
+```cpp
+// batterySymbol() + createBatteryIcon() 可直接搬至新 ui_lvgl.cpp
+const char* batterySymbol(int8_t pct) { /* LV_SYMBOL_BATTERY_* */ }
+```
+
+### 11.4 不需複製的 BUS-ETA 模組
+
+| 檔案 | 原因 |
+|------|------|
+| `mtr_api.*` / `kmb_api.*` / `eta_api.*` | 巴士 ETA API，與溫濕度無關 |
+| `app_state.*` / `stops.h` | 路線設定狀態，由 `record_store.*` 取代 |
+| `firmware/scripts/gen_stops.py` | 巴士站名產生器，不需要 |
+
+### 11.5 兩個 repo 的關係
+
+```
+BUS-ETA (上游)                         ESP32_temp_mon (本專案)
+├── firmware/eta-app-esp32/            ├── firmware/temp-monitor-esp32/
+│   ├── board.cpp          ──複製──→   │   ├── board.cpp          (共用)
+│   ├── st7305_display.*   ──複製──→   │   ├── st7305_display.*   (共用)
+│   ├── display_epaper.*   ──複製──→   │   ├── display_epaper.*   (共用)
+│   ├── ui_lvgl.*          ──參考──→   │   ├── ui_lvgl.*          (新建：chart UI)
+│   ├── eta-app-esp32.ino  ──參考──→   │   ├── temp-monitor.ino   (新建)
+│   └── app_state.*        ──參考──→   │   └── record_store.*     (新建：3天紀錄)
+│   ├── mtr/kmb/eta_api.*  ✗ 不複製
+│   └── stops.h            ✗ 不複製
+```
+
+> 長期維護建議：將 `board.*`、`st7305_display.*`、`display_epaper.*` 等共用檔案抽成獨立 git submodule 或 shared library，避免兩 repo 漂移。初期可直接 copy-paste，BUS-ETA 已驗證可正常運作。
 
 ---
 
 ## 12. 下一步行動
 
-1. **建立 `firmware/temp-monitor-esp32/` 專案**，從 ETA App 移植 ST7305 + SHTC3 + LVGL 基礎框架。
-2. **實作 `record_store.cpp`**：864 筆 Flash 環形緩衝區。
-3. **設計 LVGL UI**：標題列 + 溫濕度大字 + `lv_chart` 折線圖 + 狀態列。
-4. **整合 NTP 時間同步**與 WiFiManager（選配）。
+1. **從 BUS-ETA 複製共用模組**至 `firmware/temp-monitor-esp32/`（見 §8.1 腳本）。
+2. **建立 `temp-monitor-esp32.ino`**：參考 `eta-app-esp32.ino` 的開機 / Wi-Fi / NTP / 感測器主迴圈。
+3. **新建 `ui_lvgl.cpp`**：日期時間標題列 + 溫濕度大字 + `lv_chart` 折線圖（複用 `stylePanel`、`batterySymbol`）。
+4. **新建 `record_store.cpp`**：864 筆 NVS 環形緩衝區（參考 `app_state.cpp` 的 `Preferences` 模式）。
+5. **修改 `config.h`**：移除 ETA 常數，新增 `SAMPLE_INTERVAL_MS`、`RECORD_MAX`、portal SSID 改 `TempMon-Setup`。
 
 ---
 
-*文件版本：v0.2 | 硬體：Waveshare ESP32-S3-RLCD-4.2 | 更新日期：2026-08-25*
+*文件版本：v0.3 | 硬體：Waveshare ESP32-S3-RLCD-4.2 | 上游：[BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA) | 更新日期：2026-08-25*

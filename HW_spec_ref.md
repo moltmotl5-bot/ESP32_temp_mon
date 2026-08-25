@@ -1,5 +1,9 @@
 # ETA App — ESP32-S3 Firmware
 
+> **完整原始文件**：[BUS-ETA README](https://github.com/moltmotl5-bot/BUS-ETA/blob/main/firmware/README.md)
+>
+> 本檔為本地摘要，供 `ESP32_temp_mon` 專案參考。溫濕度監控韌體可直接調用 BUS-ETA 中已實作的底層模組（詳見 [README-2.md §11](./README-2.md)）。
+
 MTR bus arrival display for the **Waveshare ESP32-S3-RLCD-4.2** board:
 
 | Component | Model |
