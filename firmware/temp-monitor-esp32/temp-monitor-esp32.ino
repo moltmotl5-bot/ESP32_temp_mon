@@ -1,6 +1,6 @@
 /**
  * Temp Monitor — Waveshare ESP32-S3-RLCD-4.2
- * Phase 4: SD card long-term CSV logging (alongside NVS)
+ * Phase 5: onboard HTTP dashboard (WebServer on port 80)
  */
 
 #define LV_CONF_INCLUDE_SIMPLE
@@ -18,6 +18,7 @@
 #include "sd_logger.h"
 #include "time_keeper.h"
 #include "ui_lvgl.h"
+#include "web_server.h"
 #include "wifi_manager.h"
 
 namespace {
@@ -31,6 +32,37 @@ char statusLine[48] = "Starting";
 time_t lastStoredSlot = 0;
 
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
+
+void updateWebState() {
+  WebDashboardState state;
+  state.tempC = lastTempC;
+  state.humidity = lastHumidity;
+  state.hasSensor = hasSensor;
+  state.batteryPct = lastBatteryPct;
+  state.wifiConnected = wifiManagerIsConnected();
+  state.timeValid = timeKeeperIsValid();
+  state.sdReady = sdLoggerReady();
+  state.recordCount = recordStoreCount();
+  state.recordMax = recordStoreMax();
+  webServerUpdateState(state);
+}
+
+void serviceWebServer() {
+  const bool online = wifiManagerIsConnected() && !wifiManagerPortalActive();
+  static bool webStarted = false;
+
+  updateWebState();
+  if (online) {
+    if (!webStarted) {
+      webServerBegin();
+      webStarted = true;
+    }
+    webServerLoop();
+  } else if (webStarted) {
+    webServerStop();
+    webStarted = false;
+  }
+}
 
 void refreshScreen() {
   if (!displayReady()) return;
@@ -177,7 +209,7 @@ void setup() {
   }
   delay(200);
   Serial.println();
-  Serial.println("=== Temp Monitor Phase 4 boot ===");
+  Serial.println("=== Temp Monitor Phase 5 boot ===");
 
   boardPowerInit();
   delay(100);
@@ -217,6 +249,7 @@ void setup() {
 void loop() {
   wifiManagerLoop(serviceTick);
   displayTick();
+  serviceWebServer();
 
   static uint32_t lastBatteryMs = 0;
   if (millis() - lastBatteryMs >= BATTERY_READ_MS) {

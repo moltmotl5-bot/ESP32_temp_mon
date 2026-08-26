@@ -35,6 +35,15 @@ Shared drivers copied from [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA).
 
 Insert a FAT32 microSD (≤32 GB recommended). Remove the card on a PC to read `temp_log.csv`.
 
+## Phase 5 checklist — HTTP dashboard
+
+- [x] Built-in WebServer on port 80 when WiFi connected
+- [x] Dashboard at `http://<device-ip>/` — temp, humidity, battery, 12h chart
+- [x] JSON APIs: `/api/status`, `/api/history`
+- [x] Auto refresh every 30s in browser
+
+After WiFi connects, check Serial for `Web dashboard: http://x.x.x.x`
+
 ## Build
 
 **不要用 `sudo`**。若看到路徑含 `/private/var/root/`，代表用了 root 帳號，請改以一般使用者執行。
