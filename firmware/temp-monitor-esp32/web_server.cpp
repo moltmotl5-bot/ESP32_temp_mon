@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "record_store.h"
+#include "sd_logger.h"
 #include "time_keeper.h"
 
 #include <Arduino.h>
@@ -55,7 +56,7 @@ tbody tr:last-child td{border-bottom:none}
 <canvas id="chart"></canvas>
 </div>
 <div class="table-box">
-<div class="section-label">All stored readings (NVS, <span id="readings-count">--</span>)</div>
+<div class="section-label">All stored readings (<span id="readings-source">--</span>, <span id="readings-count">--</span>)</div>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Time</th><th>Temp (°C)</th><th>Humidity (%)</th></tr></thead>
@@ -155,8 +156,10 @@ function drawChart(allPoints){
  });
 }
 
-function buildReadingsTable(points){
+function buildReadingsTable(points,source){
  const tbody=document.getElementById('readings');
+ const srcLabel=source==='sd'?'SD card':'NVS';
+ document.getElementById('readings-source').textContent=srcLabel;
  document.getElementById('readings-count').textContent=points.length+' records';
  if(!points.length){
   tbody.innerHTML='<tr><td colspan="3">No data</td></tr>';
@@ -183,9 +186,11 @@ async function refresh(){
   const hr=await fetch('/api/history');
   if(!hr.ok) throw new Error('history '+hr.status);
   const h=await hr.json();
-  const pts=h.points||[];
-  drawChart(pts);
-  buildReadingsTable(pts);
+  drawChart(h.points||[]);
+  const rr=await fetch('/api/readings');
+  if(!rr.ok) throw new Error('readings '+rr.status);
+  const r=await rr.json();
+  buildReadingsTable(r.points||[],r.source||'nvs');
  }catch(e){document.getElementById('meta').textContent='Fetch failed: '+e.message;}
 }
 refresh();setInterval(refresh,30000);
@@ -225,12 +230,43 @@ void handleStatus() {
 }
 
 void handleHistory() {
-  static TempRecord recs[RECORD_MAX];
-  const uint16_t count = recordStoreCopyRecent(RECORD_MAX, recs);
+  static TempRecord recs[CHART_POINTS];
+  const uint16_t count = recordStoreCopyRecent(CHART_POINTS, recs);
 
   String body;
   body.reserve(static_cast<unsigned>(count) * 48U + 16U);
   body = "{\"points\":[";
+
+  bool first = true;
+  for (uint16_t i = 0; i < count; ++i) {
+    const TempRecord& rec = recs[i];
+    if (isnan(rec.temperature) || isnan(rec.humidity)) continue;
+
+    if (!first) body += ',';
+    first = false;
+
+    char item[72];
+    snprintf(item, sizeof(item), "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.1f}",
+             static_cast<unsigned long>(rec.timestamp), rec.temperature, rec.humidity);
+    body += item;
+  }
+
+  body += "]}";
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
+void handleReadings() {
+  String body;
+  if (sdLoggerBuildReadingsJson(body)) {
+    server.send(200, "application/json; charset=utf-8", body);
+    return;
+  }
+
+  static TempRecord recs[RECORD_MAX];
+  const uint16_t count = recordStoreCopyRecent(RECORD_MAX, recs);
+
+  body.reserve(static_cast<unsigned>(count) * 48U + 32U);
+  body = "{\"source\":\"nvs\",\"points\":[";
 
   bool first = true;
   for (uint16_t i = 0; i < count; ++i) {
@@ -263,6 +299,7 @@ void webServerBegin() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/history", HTTP_GET, handleHistory);
+  server.on("/api/readings", HTTP_GET, handleReadings);
   server.onNotFound(handleNotFound);
   server.begin();
 

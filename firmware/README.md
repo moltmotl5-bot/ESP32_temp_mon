@@ -38,8 +38,8 @@ Insert a FAT32 microSD (≤32 GB recommended). Remove the card on a PC to read `
 ## Phase 5 checklist — HTTP dashboard
 
 - [x] Built-in WebServer on port 80 when WiFi connected
-- [x] Dashboard at `http://<device-ip>/` — Temperature Dashboard: temp, humidity, battery, 12h chart (hourly X / 5°C Y grid), full NVS readings table
-- [x] JSON APIs: `/api/status`, `/api/history`
+- [x] Dashboard at `http://<device-ip>/` — Temperature Dashboard: temp, humidity, battery, 12h chart, readings table (SD card if available, else NVS)
+- [x] JSON APIs: `/api/status`, `/api/history` (12h chart), `/api/readings` (SD first, else NVS)
 - [x] Auto refresh every 30s in browser
 
 After WiFi connects, check Serial for `Web dashboard: http://x.x.x.x`
