@@ -2,10 +2,12 @@
 
 #include "config.h"
 
+#include "firebase_root_ca.h"
+
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <NetworkClientSecure.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,10 +17,6 @@
 #include "secrets.h.example"
 #warning "Copy secrets.h.example to secrets.h and set FIREBASE_DEVICE_KEY"
 #endif
-
-extern "C" {
-#include "esp_crt_bundle.h"
-}
 
 namespace {
 constexpr uint32_t META_PUSH_INTERVAL_MS = 30000;
@@ -34,8 +32,8 @@ bool putJson(const char* pathSuffix, const char* jsonBody) {
     return false;
   }
 
-  WiFiClientSecure client;
-  client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end);
+  NetworkClientSecure client;
+  client.setCACert(FIREBASE_ROOT_CA);
 
   HTTPClient http;
   char url[192];
