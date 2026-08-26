@@ -5,6 +5,7 @@
 #include "wifi_manager.h"
 
 #include <Arduino.h>
+#include <math.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -42,15 +43,12 @@ constexpr int Y_TICKS_FIXED[Y_TICK_COUNT] = {45, 40, 35, 30, 20};
 
 constexpr int X_TICK_COUNT = 5;
 constexpr const char* X_TICK_TEXT[X_TICK_COUNT] = {"-12h", "-9h", "-6h", "-3h", "now"};
-constexpr uint32_t TIME_EPOCH_MIN = 1700000000;
 
 const lv_font_t* fontAscii() { return &lv_font_montserrat_14; }
 
-time_t alignToSampleSlot(time_t ts) {
-  return ts - (ts % SAMPLE_INTERVAL_SEC);
+bool recordTempIsPlottable(float tempC) {
+  return !isnan(tempC) && tempC > 0.0f && tempC < 100.0f;
 }
-
-bool recordTempIsPlottable(float tempC) { return tempC >= 5.0f && tempC <= 60.0f; }
 
 void clearChartValues() {
   for (uint16_t i = 0; i < CHART_POINTS; ++i) {
@@ -58,74 +56,40 @@ void clearChartValues() {
   }
 }
 
-uint16_t mapRecordsToChartSlots(const TempRecord* recs, uint16_t count, time_t* chartEndOut) {
+uint16_t fillChartFromRecords(const TempRecord* recs, uint16_t count) {
   clearChartValues();
   if (!recs || count == 0) return 0;
 
-  const time_t now = time(nullptr);
-  const bool timeValid = now >= static_cast<time_t>(TIME_EPOCH_MIN);
+  const uint16_t n = count < CHART_POINTS ? count : CHART_POINTS;
+  const uint16_t pad = CHART_POINTS - n;
   uint16_t plotted = 0;
+  float firstPlotted = 0.0f;
+  float lastPlotted = 0.0f;
 
-  if (timeValid) {
-    time_t chartEnd = alignToSampleSlot(now);
-    const time_t newestTs = alignToSampleSlot(recs[count - 1].timestamp);
-    if (newestTs > chartEnd) {
-      chartEnd = newestTs;
-    }
+  for (uint16_t i = 0; i < n; ++i) {
+    const float temp = recs[i].temperature;
+    if (!recordTempIsPlottable(temp)) continue;
 
-    const time_t windowStart =
-        chartEnd - static_cast<time_t>(CHART_POINTS - 1) * SAMPLE_INTERVAL_SEC;
-    if (chartEndOut) *chartEndOut = chartEnd;
-
-    for (uint16_t i = 0; i < count; ++i) {
-      const TempRecord& rec = recs[i];
-      if (!recordTempIsPlottable(rec.temperature)) continue;
-
-      const time_t ts = alignToSampleSlot(rec.timestamp);
-      if (ts < windowStart || ts > chartEnd) continue;
-
-      const int slotIdx = static_cast<int>((ts - windowStart) / SAMPLE_INTERVAL_SEC);
-      if (slotIdx < 0 || slotIdx >= CHART_POINTS) continue;
-
-      chartYValues[slotIdx] = static_cast<lv_coord_t>(rec.temperature + 0.5f);
-      plotted++;
-    }
+    chartYValues[pad + i] = static_cast<lv_coord_t>(temp + 0.5f);
+    if (plotted == 0) firstPlotted = temp;
+    lastPlotted = temp;
+    plotted++;
   }
 
-  if (plotted == 0) {
-    clearChartValues();
-    const uint16_t pad = count < CHART_POINTS ? CHART_POINTS - count : 0;
-    for (uint16_t i = 0; i < count; ++i) {
-      if (!recordTempIsPlottable(recs[i].temperature)) continue;
-      chartYValues[pad + i] = static_cast<lv_coord_t>(recs[i].temperature + 0.5f);
-      plotted++;
-    }
-    if (chartEndOut) {
-      *chartEndOut = timeValid ? alignToSampleSlot(now) : 0;
-    }
-    if (plotted > 0 && count > 0) {
-      Serial.printf("Chart: timestamp map missed, sequential fallback (%u pts)\n", plotted);
-    }
-  }
-
+  Serial.printf("Chart: rec=%u copy=%u plotted=%u pad=%u temp=%.1f..%.1f y[%u]=%d\n",
+                recordStoreCount(), count, plotted, pad, firstPlotted, lastPlotted, pad + n - 1,
+                plotted > 0 ? static_cast<int>(chartYValues[pad + n - 1]) : -1);
   return plotted;
 }
 
-uint16_t collectPlottedRecords(const TempRecord* recs, uint16_t count, time_t chartEnd,
-                               TempRecord* out, uint16_t maxOut) {
-  if (!recs || !out || maxOut == 0) return 0;
+void pushChartValuesToLvgl() {
+  if (!tempChart || !tempSeries) return;
 
-  const time_t windowStart =
-      chartEnd - static_cast<time_t>(CHART_POINTS - 1) * SAMPLE_INTERVAL_SEC;
-  uint16_t n = 0;
-  for (uint16_t i = 0; i < count && n < maxOut; ++i) {
-    const TempRecord& rec = recs[i];
-    if (!recordTempIsPlottable(rec.temperature)) continue;
-    const time_t ts = alignToSampleSlot(rec.timestamp);
-    if (ts < windowStart || ts > chartEnd) continue;
-    out[n++] = rec;
+  lv_chart_set_x_start_point(tempChart, tempSeries, 0);
+  for (uint16_t i = 0; i < CHART_POINTS; ++i) {
+    lv_chart_set_value_by_id(tempChart, tempSeries, i, chartYValues[i]);
   }
-  return n;
+  lv_obj_invalidate(tempChart);
 }
 
 const char* batterySymbol(int8_t batteryPct) {
@@ -259,10 +223,11 @@ void createChartPanel() {
   lv_obj_set_size(tempChart, CHART_W, CHART_H);
   lv_obj_set_pos(tempChart, CHART_LEFT, CHART_TOP);
   lv_chart_set_type(tempChart, LV_CHART_TYPE_LINE);
+  lv_chart_set_update_mode(tempChart, LV_CHART_UPDATE_MODE_CIRCULAR);
   lv_chart_set_point_count(tempChart, CHART_POINTS);
   lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, CHART_Y_MIN, CHART_Y_MAX);
   lv_chart_set_div_line_count(tempChart, 4, X_TICK_COUNT - 1);
-  lv_obj_set_style_size(tempChart, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_size(tempChart, 4, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(tempChart, 2, LV_PART_ITEMS);
   lv_obj_set_style_bg_color(tempChart, lv_color_white(), 0);
   lv_obj_set_style_border_color(tempChart, lv_color_black(), 0);
@@ -357,19 +322,13 @@ void uiRefreshChart() {
 
   TempRecord recs[CHART_POINTS];
   const uint16_t count = recordStoreCopyRecent(CHART_POINTS, recs);
-  time_t chartEnd = 0;
-  const uint16_t plotted = mapRecordsToChartSlots(recs, count, &chartEnd);
+  fillChartFromRecords(recs, count);
 
   TempRecord yRangeRecs[CHART_POINTS];
   uint16_t yRangeCount = 0;
-  if (plotted > 0 && chartEnd > 0) {
-    yRangeCount = collectPlottedRecords(recs, count, chartEnd, yRangeRecs, CHART_POINTS);
-  }
-  if (yRangeCount == 0 && count > 0) {
-    for (uint16_t i = 0; i < count && yRangeCount < CHART_POINTS; ++i) {
-      if (recordTempIsPlottable(recs[i].temperature)) {
-        yRangeRecs[yRangeCount++] = recs[i];
-      }
+  for (uint16_t i = 0; i < count && yRangeCount < CHART_POINTS; ++i) {
+    if (recordTempIsPlottable(recs[i].temperature)) {
+      yRangeRecs[yRangeCount++] = recs[i];
     }
   }
 
@@ -381,6 +340,7 @@ void uiRefreshChart() {
   const lv_coord_t yMaxCoord = static_cast<lv_coord_t>(yMax);
   lv_chart_set_range(tempChart, LV_CHART_AXIS_PRIMARY_Y, yMinCoord, yMaxCoord);
 
+  pushChartValuesToLvgl();
   lv_chart_refresh(tempChart);
   updateYAxisLabels(yMinCoord, yMaxCoord);
 
