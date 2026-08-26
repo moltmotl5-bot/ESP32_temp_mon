@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <math.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -66,7 +67,9 @@ function drawChart(points){
 }
 async function refresh(){
  try{
-  const s=await fetch('/api/status').then(r=>r.json());
+  const sr=await fetch('/api/status');
+  if(!sr.ok) throw new Error('status '+sr.status);
+  const s=await sr.json();
   document.getElementById('temp').textContent=s.sensor?s.temp.toFixed(1)+' C':'ERR';
   document.getElementById('hum').textContent=s.sensor?s.hum.toFixed(1)+' %':'ERR';
   document.getElementById('bat').textContent=s.battery>=0?s.battery+' %':'--';
@@ -74,9 +77,11 @@ async function refresh(){
     'Clock: <b>'+s.clock+'</b><br>'+
     'WiFi: '+(s.wifi?'OK':'--')+' | NTP: '+(s.timeValid?(s.wifi?'OK':'loc'):'--')+
     ' | SD: '+(s.sd?'OK':'--')+' | Records: '+s.records+'/'+s.recordsMax;
-  const h=await fetch('/api/history').then(r=>r.json());
+  const hr=await fetch('/api/history');
+  if(!hr.ok) throw new Error('history '+hr.status);
+  const h=await hr.json();
   drawChart(h.points||[]);
- }catch(e){document.getElementById('meta').textContent='Fetch failed';}
+ }catch(e){document.getElementById('meta').textContent='Fetch failed: '+e.message;}
 }
 refresh();setInterval(refresh,30000);
 </script>
@@ -111,24 +116,33 @@ void handleStatus() {
            dashboardState.wifiConnected ? "true" : "false",
            dashboardState.timeValid ? "true" : "false", dashboardState.sdReady ? "true" : "false",
            dashboardState.recordCount, dashboardState.recordMax, clockLine);
-  server.send(200, "application/json", body);
+  server.send(200, "application/json; charset=utf-8", body);
 }
 
 void handleHistory() {
   TempRecord recs[CHART_POINTS];
   const uint16_t count = recordStoreCopyRecent(CHART_POINTS, recs);
 
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "application/json", "");
-  WiFiClient client = server.client();
-  client.print("{\"points\":[");
+  String body;
+  body.reserve(static_cast<unsigned>(count) * 48U + 16U);
+  body = "{\"points\":[";
+
+  bool first = true;
   for (uint16_t i = 0; i < count; ++i) {
-    if (i > 0) client.print(',');
-    client.printf("{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.1f}",
-                  static_cast<unsigned long>(recs[i].timestamp), recs[i].temperature,
-                  recs[i].humidity);
+    const TempRecord& rec = recs[i];
+    if (isnan(rec.temperature) || isnan(rec.humidity)) continue;
+
+    if (!first) body += ',';
+    first = false;
+
+    char item[72];
+    snprintf(item, sizeof(item), "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.1f}",
+             static_cast<unsigned long>(rec.timestamp), rec.temperature, rec.humidity);
+    body += item;
   }
-  client.print("]}");
+
+  body += "]}";
+  server.send(200, "application/json; charset=utf-8", body);
 }
 
 void handleNotFound() { server.send(404, "text/plain", "Not found"); }
