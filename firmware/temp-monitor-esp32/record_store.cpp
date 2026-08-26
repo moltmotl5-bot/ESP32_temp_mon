@@ -32,6 +32,15 @@ void sanitizeMeta() {
   if (count > RECORD_MAX) count = RECORD_MAX;
 }
 
+int chunksNeededForCount(uint16_t n) {
+  if (n == 0) return 0;
+  return static_cast<int>((n - 1) / CHUNK_RECORDS) + 1;
+}
+
+int chunkIndexForRecord(uint16_t recordIndex) {
+  return static_cast<int>(recordIndex / CHUNK_RECORDS);
+}
+
 void removeAllDataKeys() {
   prefs.remove(KEY_DATA_LEGACY);
   for (int i = 0; i < CHUNK_COUNT; ++i) {
@@ -39,22 +48,26 @@ void removeAllDataKeys() {
   }
 }
 
-bool chunkSizesValid() {
-  for (int i = 0; i < CHUNK_COUNT; ++i) {
-    if (prefs.getBytesLength(CHUNK_KEYS[i]) != CHUNK_BYTES) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool loadChunkedRecords() {
-  if (!chunkSizesValid()) return false;
-
+  bool anyChunk = false;
   for (int i = 0; i < CHUNK_COUNT; ++i) {
     const size_t offset = static_cast<size_t>(i) * CHUNK_BYTES;
-    if (prefs.getBytes(CHUNK_KEYS[i], reinterpret_cast<uint8_t*>(records) + offset, CHUNK_BYTES) !=
-        CHUNK_BYTES) {
+    const size_t blobLen = prefs.getBytesLength(CHUNK_KEYS[i]);
+    if (blobLen == CHUNK_BYTES) {
+      if (prefs.getBytes(CHUNK_KEYS[i], reinterpret_cast<uint8_t*>(records) + offset, CHUNK_BYTES) !=
+          CHUNK_BYTES) {
+        return false;
+      }
+      anyChunk = true;
+    } else {
+      memset(reinterpret_cast<uint8_t*>(records) + offset, 0, CHUNK_BYTES);
+    }
+  }
+
+  if (count == 0) return anyChunk;
+  const int needed = chunksNeededForCount(count);
+  for (int i = 0; i < needed; ++i) {
+    if (prefs.getBytesLength(CHUNK_KEYS[i]) != CHUNK_BYTES) {
       return false;
     }
   }
@@ -67,38 +80,42 @@ bool loadLegacyRecords() {
   return prefs.getBytes(KEY_DATA_LEGACY, records, sizeof(records)) == sizeof(records);
 }
 
-bool saveChunkedRecordsOnce() {
-  bool ok = true;
-  for (int i = 0; i < CHUNK_COUNT; ++i) {
-    const size_t offset = static_cast<size_t>(i) * CHUNK_BYTES;
-    const size_t written =
-        prefs.putBytes(CHUNK_KEYS[i], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
-    if (written != CHUNK_BYTES) {
-      Serial.printf("Record store: chunk %d write failed (%u/%u)\n", i,
-                    static_cast<unsigned>(written), static_cast<unsigned>(CHUNK_BYTES));
-      ok = false;
-    }
+bool persistChunk(int chunkIdx) {
+  if (chunkIdx < 0 || chunkIdx >= CHUNK_COUNT) return false;
+
+  const size_t offset = static_cast<size_t>(chunkIdx) * CHUNK_BYTES;
+  const size_t written =
+      prefs.putBytes(CHUNK_KEYS[chunkIdx], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
+  if (written == CHUNK_BYTES) return true;
+
+  Serial.printf("Record store: chunk %d write failed (%u/%u)\n", chunkIdx,
+                static_cast<unsigned>(written), static_cast<unsigned>(CHUNK_BYTES));
+  prefs.remove(CHUNK_KEYS[chunkIdx]);
+  const size_t retry =
+      prefs.putBytes(CHUNK_KEYS[chunkIdx], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
+  if (retry != CHUNK_BYTES) {
+    Serial.printf("Record store: chunk %d retry failed (%u/%u)\n", chunkIdx,
+                  static_cast<unsigned>(retry), static_cast<unsigned>(CHUNK_BYTES));
   }
-  return ok;
+  return retry == CHUNK_BYTES;
 }
 
-bool saveChunkedRecords() {
-  removeAllDataKeys();
-  if (saveChunkedRecordsOnce()) {
-    return true;
-  }
-
-  Serial.println("Record store: retry after clearing data keys");
-  removeAllDataKeys();
-  return saveChunkedRecordsOnce();
+bool persistMeta() {
+  return prefs.putUShort(KEY_HEAD, head) > 0 && prefs.putUShort(KEY_COUNT, count) > 0;
 }
 
-void persistLocked() {
-  prefs.putUShort(KEY_HEAD, head);
-  prefs.putUShort(KEY_COUNT, count);
-  if (!saveChunkedRecords()) {
-    Serial.println("Record store: persist failed — NVS may be full; use BOOT long clear or erase NVS");
+bool persistUsedChunks() {
+  const int needed = chunksNeededForCount(count);
+  for (int i = 0; i < needed; ++i) {
+    if (!persistChunk(i)) return false;
   }
+  prefs.remove(KEY_DATA_LEGACY);
+  return true;
+}
+
+bool persistSingleRecord(uint16_t recordIndex) {
+  if (!persistMeta()) return false;
+  return persistChunk(chunkIndexForRecord(recordIndex));
 }
 
 void logLatestSample() {
@@ -130,9 +147,11 @@ void recordStoreInit() {
       prefs.putUShort(KEY_HEAD, head);
       prefs.putUShort(KEY_COUNT, count);
     }
-  } else if (hasLegacy && !chunkSizesValid()) {
+  } else if (hasLegacy) {
     Serial.println("Record store: migrating legacy blob to chunked NVS");
-    persistLocked();
+    if (!persistUsedChunks()) {
+      Serial.println("Record store: legacy migration failed");
+    }
   }
 
   prefs.end();
@@ -149,9 +168,10 @@ bool recordStoreAppend(uint32_t timestamp, float tempC, float humPct) {
     return false;
   }
 
-  records[head].timestamp = timestamp;
-  records[head].temperature = tempC;
-  records[head].humidity = humPct;
+  const uint16_t savedIndex = head;
+  records[savedIndex].timestamp = timestamp;
+  records[savedIndex].temperature = tempC;
+  records[savedIndex].humidity = humPct;
 
   head = static_cast<uint16_t>((head + 1) % RECORD_MAX);
   if (count < RECORD_MAX) {
@@ -159,7 +179,9 @@ bool recordStoreAppend(uint32_t timestamp, float tempC, float humPct) {
   }
 
   prefs.begin(NVS_NS, false);
-  persistLocked();
+  if (!persistSingleRecord(savedIndex)) {
+    Serial.println("Record store: persist failed — NVS may be full; try erase flash once");
+  }
   prefs.end();
 
   Serial.printf("Record saved: ts=%lu %.1f C %.1f %% (%u/%u)\n", static_cast<unsigned long>(timestamp),
@@ -212,7 +234,6 @@ void recordStoreClear() {
   removeAllDataKeys();
   prefs.putUShort(KEY_HEAD, head);
   prefs.putUShort(KEY_COUNT, count);
-  saveChunkedRecords();
   prefs.end();
 
   Serial.println("Record store cleared");
