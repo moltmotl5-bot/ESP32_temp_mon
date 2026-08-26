@@ -38,7 +38,7 @@ Insert a FAT32 microSD (≤32 GB recommended). Remove the card on a PC to read `
 ## Phase 5 checklist — HTTP dashboard
 
 - [x] Built-in WebServer on port 80 when WiFi connected
-- [x] Dashboard at `http://<device-ip>/` — temp, humidity, battery, 12h chart
+- [x] Dashboard at `http://<device-ip>/` — Temperature Dashboard: temp, humidity, battery, 12h chart (hourly X / 5°C Y grid), half-hourly readings table
 - [x] JSON APIs: `/api/status`, `/api/history`
 - [x] Auto refresh every 30s in browser
 
