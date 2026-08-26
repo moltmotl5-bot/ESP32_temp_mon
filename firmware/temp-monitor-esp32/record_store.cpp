@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -20,12 +21,24 @@ constexpr const char* KEY_HEAD = "head";
 constexpr const char* KEY_COUNT = "count";
 constexpr const char* KEY_DATA_LEGACY = "data";
 
-constexpr int CHUNK_COUNT = 6;
-constexpr uint16_t CHUNK_RECORDS = RECORD_MAX / CHUNK_COUNT;  // 144 records = 1728 B
+// 36 × 24 records × 12 B = 288 B per chunk (small enough for NVS copy-on-write).
+constexpr int CHUNK_COUNT = 36;
+constexpr uint16_t CHUNK_RECORDS = RECORD_MAX / CHUNK_COUNT;
 static_assert(CHUNK_RECORDS * CHUNK_COUNT == RECORD_MAX, "RECORD_MAX must divide into chunks");
 constexpr size_t CHUNK_BYTES = CHUNK_RECORDS * sizeof(TempRecord);
 
-constexpr const char* CHUNK_KEYS[CHUNK_COUNT] = {"dat0", "dat1", "dat2", "dat3", "dat4", "dat5"};
+// Legacy 6-chunk layout (1728 B) — kept for one-time migration only.
+constexpr int LEGACY_CHUNK_COUNT = 6;
+constexpr uint16_t LEGACY_CHUNK_RECORDS = RECORD_MAX / LEGACY_CHUNK_COUNT;
+static_assert(LEGACY_CHUNK_RECORDS * LEGACY_CHUNK_COUNT == RECORD_MAX,
+              "RECORD_MAX must divide into legacy chunks");
+constexpr size_t LEGACY_CHUNK_BYTES = LEGACY_CHUNK_RECORDS * sizeof(TempRecord);
+constexpr const char* LEGACY_CHUNK_KEYS[LEGACY_CHUNK_COUNT] = {"dat0", "dat1", "dat2",
+                                                               "dat3", "dat4", "dat5"};
+
+void chunkKey(int chunkIdx, char* buf, size_t bufLen) {
+  snprintf(buf, bufLen, "c%02u", static_cast<unsigned>(chunkIdx));
+}
 
 void sanitizeMeta() {
   if (head >= RECORD_MAX) head = 0;
@@ -41,20 +54,40 @@ int chunkIndexForRecord(uint16_t recordIndex) {
   return static_cast<int>(recordIndex / CHUNK_RECORDS);
 }
 
-void removeAllDataKeys() {
+void removeLegacyDataKeys() {
   prefs.remove(KEY_DATA_LEGACY);
-  for (int i = 0; i < CHUNK_COUNT; ++i) {
-    prefs.remove(CHUNK_KEYS[i]);
+  for (int i = 0; i < LEGACY_CHUNK_COUNT; ++i) {
+    prefs.remove(LEGACY_CHUNK_KEYS[i]);
   }
 }
 
-bool loadChunkedRecords() {
+void removeAllChunkKeys() {
+  char key[8];
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
+    chunkKey(i, key, sizeof(key));
+    prefs.remove(key);
+  }
+}
+
+void removeAllDataKeys() {
+  removeLegacyDataKeys();
+  removeAllChunkKeys();
+}
+
+bool loadNewChunkedRecords() {
+  char keys[CHUNK_COUNT][8];
+  const char* keyPtrs[CHUNK_COUNT];
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
+    chunkKey(i, keys[i], sizeof(keys[i]));
+    keyPtrs[i] = keys[i];
+  }
+  // Reuse generic loader via key pointer array trick — inline instead.
   bool anyChunk = false;
   for (int i = 0; i < CHUNK_COUNT; ++i) {
     const size_t offset = static_cast<size_t>(i) * CHUNK_BYTES;
-    const size_t blobLen = prefs.getBytesLength(CHUNK_KEYS[i]);
+    const size_t blobLen = prefs.getBytesLength(keyPtrs[i]);
     if (blobLen == CHUNK_BYTES) {
-      if (prefs.getBytes(CHUNK_KEYS[i], reinterpret_cast<uint8_t*>(records) + offset, CHUNK_BYTES) !=
+      if (prefs.getBytes(keyPtrs[i], reinterpret_cast<uint8_t*>(records) + offset, CHUNK_BYTES) !=
           CHUNK_BYTES) {
         return false;
       }
@@ -63,11 +96,35 @@ bool loadChunkedRecords() {
       memset(reinterpret_cast<uint8_t*>(records) + offset, 0, CHUNK_BYTES);
     }
   }
-
   if (count == 0) return anyChunk;
   const int needed = chunksNeededForCount(count);
   for (int i = 0; i < needed; ++i) {
-    if (prefs.getBytesLength(CHUNK_KEYS[i]) != CHUNK_BYTES) {
+    if (prefs.getBytesLength(keyPtrs[i]) != CHUNK_BYTES) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool loadLegacyChunkedRecords() {
+  bool anyChunk = false;
+  for (int i = 0; i < LEGACY_CHUNK_COUNT; ++i) {
+    const size_t offset = static_cast<size_t>(i) * LEGACY_CHUNK_BYTES;
+    const size_t blobLen = prefs.getBytesLength(LEGACY_CHUNK_KEYS[i]);
+    if (blobLen == LEGACY_CHUNK_BYTES) {
+      if (prefs.getBytes(LEGACY_CHUNK_KEYS[i], reinterpret_cast<uint8_t*>(records) + offset,
+                         LEGACY_CHUNK_BYTES) != LEGACY_CHUNK_BYTES) {
+        return false;
+      }
+      anyChunk = true;
+    } else {
+      memset(reinterpret_cast<uint8_t*>(records) + offset, 0, LEGACY_CHUNK_BYTES);
+    }
+  }
+  if (count == 0) return anyChunk;
+  const int needed = static_cast<int>((count - 1) / LEGACY_CHUNK_RECORDS) + 1;
+  for (int i = 0; i < needed; ++i) {
+    if (prefs.getBytesLength(LEGACY_CHUNK_KEYS[i]) != LEGACY_CHUNK_BYTES) {
       return false;
     }
   }
@@ -80,22 +137,32 @@ bool loadLegacyRecords() {
   return prefs.getBytes(KEY_DATA_LEGACY, records, sizeof(records)) == sizeof(records);
 }
 
+bool hasLegacyStorageKeys() {
+  if (prefs.getBytesLength(KEY_DATA_LEGACY) > 0) return true;
+  for (int i = 0; i < LEGACY_CHUNK_COUNT; ++i) {
+    if (prefs.getBytesLength(LEGACY_CHUNK_KEYS[i]) > 0) return true;
+  }
+  return false;
+}
+
 bool persistChunk(int chunkIdx) {
   if (chunkIdx < 0 || chunkIdx >= CHUNK_COUNT) return false;
 
+  char key[8];
+  chunkKey(chunkIdx, key, sizeof(key));
   const size_t offset = static_cast<size_t>(chunkIdx) * CHUNK_BYTES;
   const size_t written =
-      prefs.putBytes(CHUNK_KEYS[chunkIdx], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
+      prefs.putBytes(key, reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
   if (written == CHUNK_BYTES) return true;
 
-  Serial.printf("Record store: chunk %d write failed (%u/%u)\n", chunkIdx,
-                static_cast<unsigned>(written), static_cast<unsigned>(CHUNK_BYTES));
-  prefs.remove(CHUNK_KEYS[chunkIdx]);
+  Serial.printf("Record store: chunk %s write failed (%u/%u)\n", key, static_cast<unsigned>(written),
+                static_cast<unsigned>(CHUNK_BYTES));
+  prefs.remove(key);
   const size_t retry =
-      prefs.putBytes(CHUNK_KEYS[chunkIdx], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
+      prefs.putBytes(key, reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
   if (retry != CHUNK_BYTES) {
-    Serial.printf("Record store: chunk %d retry failed (%u/%u)\n", chunkIdx,
-                  static_cast<unsigned>(retry), static_cast<unsigned>(CHUNK_BYTES));
+    Serial.printf("Record store: chunk %s retry failed (%u/%u)\n", key, static_cast<unsigned>(retry),
+                  static_cast<unsigned>(CHUNK_BYTES));
   }
   return retry == CHUNK_BYTES;
 }
@@ -109,13 +176,23 @@ bool persistUsedChunks() {
   for (int i = 0; i < needed; ++i) {
     if (!persistChunk(i)) return false;
   }
-  prefs.remove(KEY_DATA_LEGACY);
   return true;
 }
 
 bool persistSingleRecord(uint16_t recordIndex) {
   if (!persistMeta()) return false;
   return persistChunk(chunkIndexForRecord(recordIndex));
+}
+
+bool migrateToNewChunks(const char* reason) {
+  Serial.printf("Record store: migrating to 288B chunks (%s)\n", reason);
+  if (!persistUsedChunks()) {
+    Serial.println("Record store: migration failed");
+    return false;
+  }
+  removeLegacyDataKeys();
+  Serial.println("Record store: migration complete, legacy keys removed");
+  return true;
 }
 
 void logLatestSample() {
@@ -135,22 +212,26 @@ void recordStoreInit() {
   count = prefs.getUShort(KEY_COUNT, 0);
   sanitizeMeta();
 
-  const bool hasLegacy = prefs.getBytesLength(KEY_DATA_LEGACY) > 0;
-  const bool loadedData = loadChunkedRecords() || loadLegacyRecords();
-  if (!loadedData) {
+  const bool hasLegacyKeys = hasLegacyStorageKeys();
+  const bool loadedNew = loadNewChunkedRecords();
+  const bool loadedOld = !loadedNew && (loadLegacyChunkedRecords() || loadLegacyRecords());
+
+  if (loadedNew) {
+    if (hasLegacyKeys) {
+      removeLegacyDataKeys();
+      Serial.println("Record store: removed legacy NVS keys");
+    }
+  } else if (loadedOld) {
+    migrateToNewChunks(loadLegacyRecords() ? "legacy blob" : "6×1728B chunks");
+  } else {
     memset(records, 0, sizeof(records));
     removeAllDataKeys();
-    if (head != 0 || count != 0 || hasLegacy) {
+    if (head != 0 || count != 0 || hasLegacyKeys) {
       Serial.println("Record store: data blob missing, resetting meta");
       head = 0;
       count = 0;
       prefs.putUShort(KEY_HEAD, head);
       prefs.putUShort(KEY_COUNT, count);
-    }
-  } else if (hasLegacy) {
-    Serial.println("Record store: migrating legacy blob to chunked NVS");
-    if (!persistUsedChunks()) {
-      Serial.println("Record store: legacy migration failed");
     }
   }
 
