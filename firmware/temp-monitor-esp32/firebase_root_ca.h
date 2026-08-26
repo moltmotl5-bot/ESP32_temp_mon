@@ -2,7 +2,7 @@
 
 // Google Trust Services Root R1 — verifies *.firebasedatabase.app
 // Source: https://pki.goog/repo/certs/gtsr1.pem
-static const char FIREBASE_ROOT_CA[] PROGMEM = R"EOF(
+static const char FIREBASE_ROOT_CA[] = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
 CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU
