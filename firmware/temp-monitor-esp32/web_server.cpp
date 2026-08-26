@@ -16,61 +16,158 @@ WebServer server(80);
 WebDashboardState dashboardState;
 bool running = false;
 
+// Web-only history depth: 24 h @ 5 min (does not affect on-board chart).
+constexpr uint16_t WEB_HISTORY_MAX = RECORDS_PER_DAY;
+
 const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Temp Monitor</title>
+<title>Temperature Dashboard</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#111}
 .wrap{max-width:720px;margin:0 auto;padding:16px}
 h1{font-size:1.4rem;margin:0 0 12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
 .card{background:#fff;border:1px solid #ccd;border-radius:8px;padding:14px}
-.card .label{font-size:.8rem;color:#555;margin-bottom:4px}
+.card .label,.section-label{font-size:.8rem;color:#555;margin-bottom:4px}
 .card .value{font-size:1.6rem;font-weight:700}
 .meta{font-size:.85rem;line-height:1.6;background:#fff;border:1px solid #ccd;border-radius:8px;padding:12px;margin-bottom:16px}
-.chart-box{background:#fff;border:1px solid #ccd;border-radius:8px;padding:12px;margin-bottom:12px}
-canvas{width:100%;height:220px;display:block}
-.foot{font-size:.75rem;color:#666;text-align:center}
+.chart-box,.table-box{background:#fff;border:1px solid #ccd;border-radius:8px;padding:12px;margin-bottom:12px}
+canvas{width:100%;height:260px;display:block}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb}
+th{background:#f9fafb;font-weight:600;color:#444}
+tbody tr:last-child td{border-bottom:none}
+.table-scroll{max-height:360px;overflow-y:auto}
+.foot{font-size:.75rem;color:#666;text-align:center;margin-top:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>Temp Monitor Dashboard</h1>
+<h1>Temperature Dashboard</h1>
 <div class="grid">
 <div class="card"><div class="label">Temperature</div><div class="value" id="temp">--</div></div>
 <div class="card"><div class="label">Humidity</div><div class="value" id="hum">--</div></div>
 <div class="card"><div class="label">Battery</div><div class="value" id="bat">--</div></div>
 </div>
 <div class="meta" id="meta">Loading...</div>
-<div class="chart-box"><div class="label">12-hour temperature</div><canvas id="chart"></canvas></div>
+<div class="chart-box">
+<div class="section-label">12-hour temperature (Y: 5 °C grid, X: hourly)</div>
+<canvas id="chart"></canvas>
+</div>
+<div class="table-box">
+<div class="section-label">Half-hourly readings (last 24 h)</div>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Time</th><th>Temp (°C)</th><th>Humidity (%)</th></tr></thead>
+<tbody id="readings"><tr><td colspan="3">Loading...</td></tr></tbody>
+</table>
+</div>
+</div>
 <div class="foot">Auto refresh 30s</div>
 </div>
 <script>
-const YMIN=20,YMAX=45;
-function drawChart(points){
- const c=document.getElementById('chart'),x=c.getContext('2d'),w=c.width=c.clientWidth,h=c.height=c.clientHeight;
- x.fillStyle='#fff';x.fillRect(0,0,w,h);
- x.strokeStyle='#ddd';x.lineWidth=1;
- for(let i=0;i<=4;i++){const gy=8+i*(h-16)/4;x.beginPath();x.moveTo(40,gy);x.lineTo(w-8,gy);x.stroke();}
- if(!points.length){x.fillStyle='#666';x.fillText('No data',48,h/2);return;}
- x.strokeStyle='#111';x.lineWidth=2;x.beginPath();
- points.forEach((p,i)=>{
-  const px=40+(w-48)*i/(points.length-1||1);
-  const py=8+(h-16)*(1-(p.temp-YMIN)/(YMAX-YMIN));
-  if(i===0)x.moveTo(px,py);else x.lineTo(px,py);
- });
- x.stroke();
- x.fillStyle='#666';x.fillText('-12h',42,h-2);x.fillText('now',w-36,h-2);
+const CHART_HOURS=12;
+const HALF_HOUR_SEC=1800;
+
+function yBounds(points){
+ let min=999,max=-999;
+ points.forEach(p=>{if(p.temp<min)min=p.temp;if(p.temp>max)max=p.temp;});
+ if(!isFinite(min)){min=20;max=30;}
+ let yMin=Math.floor(min/5)*5;
+ let yMax=Math.ceil(max/5)*5;
+ if(yMax-yMin<10){yMin-=5;yMax+=5;}
+ return {min:yMin,max:yMax};
 }
+
+function fmtTime(ts){
+ const d=new Date(ts*1000);
+ const p=n=>String(n).padStart(2,'0');
+ return p(d.getMonth()+1)+'/'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+function fmtHour(ts){
+ const d=new Date(ts*1000);
+ return String(d.getHours()).padStart(2,'0')+':00';
+}
+
+function drawChart(allPoints){
+ const c=document.getElementById('chart');
+ const g=c.getContext('2d');
+ const w=c.width=c.clientWidth,h=c.height=c.clientHeight;
+ const pad={l:46,r:12,t:14,b:28};
+ const pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+ g.fillStyle='#fff';g.fillRect(0,0,w,h);
+
+ let points=allPoints;
+ if(points.length>CHART_HOURS*12) points=points.slice(-CHART_HOURS*12);
+ if(!points.length){
+  g.fillStyle='#666';g.font='14px system-ui,sans-serif';
+  g.fillText('No data',pad.l+8,h/2);
+  return;
+ }
+
+ const {min:yMin,max:yMax}=yBounds(points);
+ const ySpan=yMax-yMin||5;
+ g.font='11px system-ui,sans-serif';
+ g.strokeStyle='#e5e7eb';g.lineWidth=1;
+ g.fillStyle='#666';g.textAlign='right';
+ for(let t=yMin;t<=yMax;t+=5){
+  const y=pad.t+ph*(1-(t-yMin)/ySpan);
+  g.beginPath();g.moveTo(pad.l,y);g.lineTo(w-pad.r,y);g.stroke();
+  g.fillText(t+'°',pad.l-6,y+4);
+ }
+ g.textAlign='left';
+
+ const t0=points[0].ts,t1=points[points.length-1].ts;
+ const span=t1-t0||1;
+ let hourStart=Math.ceil(t0/3600)*3600;
+ g.fillStyle='#666';
+ for(let t=hourStart;t<=t1;t+=3600){
+  const x=pad.l+pw*(t-t0)/span;
+  g.beginPath();g.moveTo(x,pad.t);g.lineTo(x,h-pad.b);g.strokeStyle='#f0f0f0';g.stroke();
+  g.fillStyle='#666';g.fillText(fmtHour(t),Math.max(pad.l,Math.min(x-14,w-pad.r-36)),h-8);
+ }
+
+ g.strokeStyle='#2563eb';g.lineWidth=2;g.beginPath();
+ points.forEach((p,i)=>{
+  const x=pad.l+pw*(p.ts-t0)/span;
+  const y=pad.t+ph*(1-(p.temp-yMin)/ySpan);
+  if(i===0)g.moveTo(x,y);else g.lineTo(x,y);
+ });
+ g.stroke();
+ points.forEach(p=>{
+  const x=pad.l+pw*(p.ts-t0)/span;
+  const y=pad.t+ph*(1-(p.temp-yMin)/ySpan);
+  g.fillStyle='#2563eb';g.beginPath();g.arc(x,y,2.5,0,Math.PI*2);g.fill();
+ });
+}
+
+function buildHalfHourTable(points){
+ const tbody=document.getElementById('readings');
+ if(!points.length){
+  tbody.innerHTML='<tr><td colspan="3">No data</td></tr>';
+  return;
+ }
+ const buckets=new Map();
+ points.forEach(p=>{
+  const slot=Math.floor(p.ts/HALF_HOUR_SEC)*HALF_HOUR_SEC;
+  buckets.set(slot,p);
+ });
+ const rows=[...buckets.values()].sort((a,b)=>b.ts-a.ts);
+ tbody.innerHTML=rows.map(p=>
+  '<tr><td>'+fmtTime(p.ts)+'</td><td>'+p.temp.toFixed(1)+'</td><td>'+p.hum.toFixed(1)+'</td></tr>'
+ ).join('');
+}
+
 async function refresh(){
  try{
   const sr=await fetch('/api/status');
   if(!sr.ok) throw new Error('status '+sr.status);
   const s=await sr.json();
-  document.getElementById('temp').textContent=s.sensor?s.temp.toFixed(1)+' C':'ERR';
+  document.getElementById('temp').textContent=s.sensor?s.temp.toFixed(1)+' °C':'ERR';
   document.getElementById('hum').textContent=s.sensor?s.hum.toFixed(1)+' %':'ERR';
   document.getElementById('bat').textContent=s.battery>=0?s.battery+' %':'--';
   document.getElementById('meta').innerHTML=
@@ -80,7 +177,9 @@ async function refresh(){
   const hr=await fetch('/api/history');
   if(!hr.ok) throw new Error('history '+hr.status);
   const h=await hr.json();
-  drawChart(h.points||[]);
+  const pts=h.points||[];
+  drawChart(pts);
+  buildHalfHourTable(pts);
  }catch(e){document.getElementById('meta').textContent='Fetch failed: '+e.message;}
 }
 refresh();setInterval(refresh,30000);
@@ -120,8 +219,8 @@ void handleStatus() {
 }
 
 void handleHistory() {
-  TempRecord recs[CHART_POINTS];
-  const uint16_t count = recordStoreCopyRecent(CHART_POINTS, recs);
+  TempRecord recs[WEB_HISTORY_MAX];
+  const uint16_t count = recordStoreCopyRecent(WEB_HISTORY_MAX, recs);
 
   String body;
   body.reserve(static_cast<unsigned>(count) * 48U + 16U);
