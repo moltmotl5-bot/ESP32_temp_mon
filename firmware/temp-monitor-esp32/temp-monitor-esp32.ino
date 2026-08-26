@@ -1,6 +1,6 @@
 /**
  * Temp Monitor — Waveshare ESP32-S3-RLCD-4.2
- * Phase 5: onboard HTTP dashboard (WebServer on port 80)
+ * Phase 6: Firebase Realtime Database upload (no LAN web server)
  */
 
 #define LV_CONF_INCLUDE_SIMPLE
@@ -13,12 +13,12 @@
 #include "board.h"
 #include "config.h"
 #include "display_epaper.h"
+#include "firebase_client.h"
 #include "input_buttons.h"
 #include "record_store.h"
 #include "sd_logger.h"
 #include "time_keeper.h"
 #include "ui_lvgl.h"
-#include "web_server.h"
 #include "wifi_manager.h"
 
 namespace {
@@ -33,35 +33,38 @@ time_t lastStoredSlot = 0;
 
 constexpr uint32_t WIFI_DISCONNECT_PORTAL_MS = 12000;
 
-void updateWebState() {
-  WebDashboardState state;
+void formatClockLine(char* out, size_t outLen) {
+  if (!out || outLen == 0) return;
+  const time_t now = time(nullptr);
+  struct tm timeInfo {};
+  if (timeKeeperIsValid() && localtime_r(&now, &timeInfo)) {
+    snprintf(out, outLen, "%04d-%02d-%02d %02d:%02d:%02d", timeInfo.tm_year + 1900,
+             timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min,
+             timeInfo.tm_sec);
+  } else {
+    snprintf(out, outLen, "---- -- -- --:--:--");
+  }
+}
+
+FirebaseMetaState buildFirebaseMeta() {
+  FirebaseMetaState state;
   state.tempC = lastTempC;
   state.humidity = lastHumidity;
   state.hasSensor = hasSensor;
   state.batteryPct = lastBatteryPct;
-  state.wifiConnected = wifiManagerIsConnected();
-  state.timeValid = timeKeeperIsValid();
   state.sdReady = sdLoggerReady();
   state.recordCount = recordStoreCount();
   state.recordMax = recordStoreMax();
-  webServerUpdateState(state);
+  static char clockLine[32];
+  formatClockLine(clockLine, sizeof(clockLine));
+  state.clockLine = clockLine;
+  return state;
 }
 
-void serviceWebServer() {
-  const bool online = wifiManagerIsConnected() && !wifiManagerPortalActive();
-  static bool webStarted = false;
-
-  updateWebState();
-  if (online) {
-    if (!webStarted) {
-      webServerBegin();
-      webStarted = true;
-    }
-    webServerLoop();
-  } else if (webStarted) {
-    webServerStop();
-    webStarted = false;
-  }
+void pushFirebaseMeta(bool force) {
+  if (!wifiManagerIsConnected() || wifiManagerPortalActive()) return;
+  if (!firebaseClientConfigured()) return;
+  firebaseClientPushMeta(buildFirebaseMeta(), force);
 }
 
 void refreshScreen() {
@@ -107,7 +110,12 @@ void maybeStoreSample() {
   const time_t slot = now - (now % SAMPLE_INTERVAL_SEC);
   if (slot == lastStoredSlot) return;
 
-  recordStoreAppend(static_cast<uint32_t>(slot), lastTempC, lastHumidity);
+  if (recordStoreAppend(static_cast<uint32_t>(slot), lastTempC, lastHumidity)) {
+    if (wifiManagerIsConnected() && firebaseClientConfigured()) {
+      firebaseClientPushReading(static_cast<uint32_t>(slot), lastTempC, lastHumidity);
+      pushFirebaseMeta(true);
+    }
+  }
   lastStoredSlot = slot;
   timeKeeperPersist();
   uiRefreshChart();
@@ -141,6 +149,7 @@ bool tryNtpSync() {
     timeKeeperPersist();
     strncpy(statusLine, "NTP synced", sizeof(statusLine) - 1);
     maybeStoreSample();
+    pushFirebaseMeta(true);
     uiRefreshChart();
   } else {
     Serial.println("NTP sync timeout");
@@ -172,6 +181,7 @@ void handleButton(ButtonEvent event) {
     case ButtonEvent::KeyShort:
       readSensor();
       maybeStoreSample();
+      pushFirebaseMeta(true);
       uiRefreshChart();
       refreshScreen();
       break;
@@ -210,7 +220,7 @@ void setup() {
   }
   delay(200);
   Serial.println();
-  Serial.println("=== Temp Monitor Phase 5 boot ===");
+  Serial.println("=== Temp Monitor Phase 6 boot ===");
 
   boardPowerInit();
   delay(100);
@@ -239,6 +249,12 @@ void setup() {
     readSensor();
   }
 
+  if (firebaseClientConfigured()) {
+    Serial.println("Firebase: configured");
+  } else {
+    Serial.println("Firebase: disabled (copy secrets.h.example to secrets.h)");
+  }
+
   strncpy(statusLine, "Connecting", sizeof(statusLine) - 1);
   statusLine[sizeof(statusLine) - 1] = '\0';
   refreshScreen();
@@ -250,7 +266,6 @@ void setup() {
 void loop() {
   wifiManagerLoop(serviceTick);
   displayTick();
-  serviceWebServer();
 
   static uint32_t lastBatteryMs = 0;
   if (millis() - lastBatteryMs >= BATTERY_READ_MS) {
@@ -263,6 +278,7 @@ void loop() {
     lastSensorMs = millis();
     readSensor();
     maybeStoreSample();
+    pushFirebaseMeta(false);
     uiRefreshChart();
     refreshScreen();
   }
@@ -303,6 +319,7 @@ void loop() {
     } else {
       if (disconnectedSinceMs != 0) {
         timeSyncAttempted = false;
+        pushFirebaseMeta(true);
       }
       disconnectedSinceMs = 0;
     }

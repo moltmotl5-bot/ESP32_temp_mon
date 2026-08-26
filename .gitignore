@@ -1,2 +1,3 @@
 .arduino15/
 bin/
+firmware/temp-monitor-esp32/secrets.h

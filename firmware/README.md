@@ -35,14 +35,30 @@ Shared drivers copied from [BUS-ETA](https://github.com/moltmotl5-bot/BUS-ETA).
 
 Insert a FAT32 microSD (≤32 GB recommended). Remove the card on a PC to read `temp_log.csv`.
 
-## Phase 5 checklist — HTTP dashboard
+## Phase 5 checklist — Cloud dashboard (GitHub Pages + Firebase)
 
-- [x] Built-in WebServer on port 80 when WiFi connected
-- [x] Dashboard at `http://<device-ip>/` — Temperature Dashboard: temp, humidity, battery, 12h chart, readings table (SD card if available, else NVS)
-- [x] JSON APIs: `/api/status`, `/api/history` (12h chart), `/api/readings` (SD first, else NVS)
-- [x] Auto refresh every 30s in browser
+- [x] LAN WebServer **removed** from ESP32
+- [x] ESP32 HTTPS upload to Firebase Realtime Database (`devices/esp32-s3-kls/`)
+- [x] Static dashboard in repo `/docs` for GitHub Pages
+- [x] Email/password login (Firebase Auth)
 
-After WiFi connects, check Serial for `Web dashboard: http://x.x.x.x`
+See [docs/README.md](../docs/README.md) for Pages deploy steps.
+
+### Firebase firmware setup
+
+```bash
+cd firmware/temp-monitor-esp32
+cp secrets.h.example secrets.h
+# Edit secrets.h — set FIREBASE_DEVICE_KEY to match RTDB Rules
+```
+
+Serial when uploading (WiFi connected):
+
+```
+Firebase: configured
+Firebase: reading ts=...
+Firebase: meta updated
+```
 
 ## Build
 
@@ -112,13 +128,9 @@ Board FQBN: `esp32:esp32:esp32s3:PartitionScheme=huge_app,PSRAM=opi,FlashSize=16
 ## Serial output (115200)
 
 ```
-=== Temp Monitor Phase 4 boot ===
+=== Temp Monitor Phase 6 boot ===
+Firebase: configured
 Record store: 12/864 entries (head=12)
-SD logger: mounted (8192 MB)
-SD logger: created temp_log.csv
-SHTC3 probe OK (id=0x0887)
-Display OK
-Sensor: 26.5 C, 58.2 %RH
-Record saved: ts=... 26.5 C 58.2 % (13/864)
-SD log: ts=... 26.5 C 58.2 %
+Firebase: reading ts=1787712300
+Firebase: meta updated
 ```
