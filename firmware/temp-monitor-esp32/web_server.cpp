@@ -16,9 +16,6 @@ WebServer server(80);
 WebDashboardState dashboardState;
 bool running = false;
 
-// Web-only history depth: 24 h @ 5 min (does not affect on-board chart).
-constexpr uint16_t WEB_HISTORY_MAX = RECORDS_PER_DAY;
-
 const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -40,7 +37,7 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb}
 th{background:#f9fafb;font-weight:600;color:#444}
 tbody tr:last-child td{border-bottom:none}
-.table-scroll{max-height:360px;overflow-y:auto}
+.table-scroll{max-height:480px;overflow-y:auto}
 .foot{font-size:.75rem;color:#666;text-align:center;margin-top:8px}
 </style>
 </head>
@@ -58,7 +55,7 @@ tbody tr:last-child td{border-bottom:none}
 <canvas id="chart"></canvas>
 </div>
 <div class="table-box">
-<div class="section-label">Half-hourly readings (last 24 h)</div>
+<div class="section-label">All stored readings (NVS, <span id="readings-count">--</span>)</div>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Time</th><th>Temp (°C)</th><th>Humidity (%)</th></tr></thead>
@@ -70,7 +67,6 @@ tbody tr:last-child td{border-bottom:none}
 </div>
 <script>
 const CHART_HOURS=12;
-const HALF_HOUR_SEC=1800;
 
 function yBounds(points){
  let min=999,max=-999;
@@ -159,18 +155,14 @@ function drawChart(allPoints){
  });
 }
 
-function buildHalfHourTable(points){
+function buildReadingsTable(points){
  const tbody=document.getElementById('readings');
+ document.getElementById('readings-count').textContent=points.length+' records';
  if(!points.length){
   tbody.innerHTML='<tr><td colspan="3">No data</td></tr>';
   return;
  }
- const buckets=new Map();
- points.forEach(p=>{
-  const slot=Math.floor(p.ts/HALF_HOUR_SEC)*HALF_HOUR_SEC;
-  buckets.set(slot,p);
- });
- const rows=[...buckets.values()].sort((a,b)=>b.ts-a.ts);
+ const rows=[...points].sort((a,b)=>b.ts-a.ts);
  tbody.innerHTML=rows.map(p=>
   '<tr><td>'+fmtTime(p.ts)+'</td><td>'+p.temp.toFixed(1)+'</td><td>'+p.hum.toFixed(1)+'</td></tr>'
  ).join('');
@@ -193,7 +185,7 @@ async function refresh(){
   const h=await hr.json();
   const pts=h.points||[];
   drawChart(pts);
-  buildHalfHourTable(pts);
+  buildReadingsTable(pts);
  }catch(e){document.getElementById('meta').textContent='Fetch failed: '+e.message;}
 }
 refresh();setInterval(refresh,30000);
@@ -233,8 +225,8 @@ void handleStatus() {
 }
 
 void handleHistory() {
-  TempRecord recs[WEB_HISTORY_MAX];
-  const uint16_t count = recordStoreCopyRecent(WEB_HISTORY_MAX, recs);
+  static TempRecord recs[RECORD_MAX];
+  const uint16_t count = recordStoreCopyRecent(RECORD_MAX, recs);
 
   String body;
   body.reserve(static_cast<unsigned>(count) * 48U + 16U);
