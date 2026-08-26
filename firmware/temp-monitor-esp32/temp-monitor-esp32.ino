@@ -141,6 +141,7 @@ bool tryNtpSync() {
     timeKeeperPersist();
     strncpy(statusLine, "NTP synced", sizeof(statusLine) - 1);
     maybeStoreSample();
+    uiRefreshChart();
   } else {
     Serial.println("NTP sync timeout");
     strncpy(statusLine, "NTP failed", sizeof(statusLine) - 1);

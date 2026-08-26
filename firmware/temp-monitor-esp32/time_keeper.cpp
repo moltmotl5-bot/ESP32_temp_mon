@@ -1,5 +1,6 @@
 #include "time_keeper.h"
 
+#include "config.h"
 #include "record_store.h"
 
 #include <Arduino.h>
@@ -37,9 +38,16 @@ void timeKeeperInit() {
   uint32_t latestRecTs = 0;
   if (recordStoreLatestTimestamp(&latestRecTs)) {
     const time_t now = time(nullptr);
-    if (static_cast<time_t>(latestRecTs) > now) {
-      applyEpoch(static_cast<time_t>(latestRecTs));
+    const time_t latest = static_cast<time_t>(latestRecTs);
+    if (latest > now) {
+      applyEpoch(latest);
       Serial.printf("Time aligned to latest record: %lu\n", static_cast<unsigned long>(latestRecTs));
+      timeKeeperPersist();
+    } else if (now > latest + static_cast<time_t>(SAMPLE_INTERVAL_SEC * 2) &&
+               latest >= static_cast<time_t>(EPOCH_MIN)) {
+      // NVS epoch was ahead of stored samples (common after NTP drift / flash).
+      applyEpoch(latest);
+      Serial.printf("Time pulled back to latest record: %lu\n", static_cast<unsigned long>(latestRecTs));
       timeKeeperPersist();
     }
   }

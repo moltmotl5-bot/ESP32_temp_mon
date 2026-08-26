@@ -4,6 +4,7 @@
 #include "record_store.h"
 #include "wifi_manager.h"
 
+#include <Arduino.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -62,32 +63,51 @@ uint16_t mapRecordsToChartSlots(const TempRecord* recs, uint16_t count, time_t* 
   if (!recs || count == 0) return 0;
 
   const time_t now = time(nullptr);
-  if (now < static_cast<time_t>(TIME_EPOCH_MIN)) return 0;
-
-  time_t chartEnd = alignToSampleSlot(now);
-  const time_t newestTs = alignToSampleSlot(recs[count - 1].timestamp);
-  if (newestTs > chartEnd) {
-    chartEnd = newestTs;
-  }
-
-  const time_t windowStart =
-      chartEnd - static_cast<time_t>(CHART_POINTS - 1) * SAMPLE_INTERVAL_SEC;
-  if (chartEndOut) *chartEndOut = chartEnd;
-
+  const bool timeValid = now >= static_cast<time_t>(TIME_EPOCH_MIN);
   uint16_t plotted = 0;
-  for (uint16_t i = 0; i < count; ++i) {
-    const TempRecord& rec = recs[i];
-    if (!recordTempIsPlottable(rec.temperature)) continue;
 
-    const time_t ts = alignToSampleSlot(rec.timestamp);
-    if (ts < windowStart || ts > chartEnd) continue;
+  if (timeValid) {
+    time_t chartEnd = alignToSampleSlot(now);
+    const time_t newestTs = alignToSampleSlot(recs[count - 1].timestamp);
+    if (newestTs > chartEnd) {
+      chartEnd = newestTs;
+    }
 
-    const int slotIdx = static_cast<int>((ts - windowStart) / SAMPLE_INTERVAL_SEC);
-    if (slotIdx < 0 || slotIdx >= CHART_POINTS) continue;
+    const time_t windowStart =
+        chartEnd - static_cast<time_t>(CHART_POINTS - 1) * SAMPLE_INTERVAL_SEC;
+    if (chartEndOut) *chartEndOut = chartEnd;
 
-    chartYValues[slotIdx] = static_cast<lv_coord_t>(rec.temperature + 0.5f);
-    plotted++;
+    for (uint16_t i = 0; i < count; ++i) {
+      const TempRecord& rec = recs[i];
+      if (!recordTempIsPlottable(rec.temperature)) continue;
+
+      const time_t ts = alignToSampleSlot(rec.timestamp);
+      if (ts < windowStart || ts > chartEnd) continue;
+
+      const int slotIdx = static_cast<int>((ts - windowStart) / SAMPLE_INTERVAL_SEC);
+      if (slotIdx < 0 || slotIdx >= CHART_POINTS) continue;
+
+      chartYValues[slotIdx] = static_cast<lv_coord_t>(rec.temperature + 0.5f);
+      plotted++;
+    }
   }
+
+  if (plotted == 0) {
+    clearChartValues();
+    const uint16_t pad = count < CHART_POINTS ? CHART_POINTS - count : 0;
+    for (uint16_t i = 0; i < count; ++i) {
+      if (!recordTempIsPlottable(recs[i].temperature)) continue;
+      chartYValues[pad + i] = static_cast<lv_coord_t>(recs[i].temperature + 0.5f);
+      plotted++;
+    }
+    if (chartEndOut) {
+      *chartEndOut = timeValid ? alignToSampleSlot(now) : 0;
+    }
+    if (plotted > 0 && count > 0) {
+      Serial.printf("Chart: timestamp map missed, sequential fallback (%u pts)\n", plotted);
+    }
+  }
+
   return plotted;
 }
 
@@ -340,13 +360,22 @@ void uiRefreshChart() {
   time_t chartEnd = 0;
   const uint16_t plotted = mapRecordsToChartSlots(recs, count, &chartEnd);
 
-  TempRecord plottedRecs[CHART_POINTS];
-  const uint16_t plottedCount =
-      plotted > 0 ? collectPlottedRecords(recs, count, chartEnd, plottedRecs, CHART_POINTS) : 0;
+  TempRecord yRangeRecs[CHART_POINTS];
+  uint16_t yRangeCount = 0;
+  if (plotted > 0 && chartEnd > 0) {
+    yRangeCount = collectPlottedRecords(recs, count, chartEnd, yRangeRecs, CHART_POINTS);
+  }
+  if (yRangeCount == 0 && count > 0) {
+    for (uint16_t i = 0; i < count && yRangeCount < CHART_POINTS; ++i) {
+      if (recordTempIsPlottable(recs[i].temperature)) {
+        yRangeRecs[yRangeCount++] = recs[i];
+      }
+    }
+  }
 
   float yMin = static_cast<float>(CHART_Y_MIN);
   float yMax = static_cast<float>(CHART_Y_MAX);
-  fillChartYRange(&yMin, &yMax, plottedRecs, plottedCount);
+  fillChartYRange(&yMin, &yMax, yRangeRecs, yRangeCount);
 
   const lv_coord_t yMinCoord = static_cast<lv_coord_t>(yMin);
   const lv_coord_t yMaxCoord = static_cast<lv_coord_t>(yMax);
