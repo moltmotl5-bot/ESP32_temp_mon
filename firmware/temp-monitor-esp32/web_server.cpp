@@ -97,19 +97,19 @@ function drawChart(allPoints){
  const c=document.getElementById('chart');
  const g=c.getContext('2d');
  const w=c.width=c.clientWidth,h=c.height=c.clientHeight;
- const pad={l:46,r:12,t:14,b:28};
+ const pad={l:46,r:12,t:14,b:34};
  const pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+ const baseY=h-pad.b;
  g.fillStyle='#fff';g.fillRect(0,0,w,h);
 
- let points=allPoints;
- if(points.length>CHART_HOURS*12) points=points.slice(-CHART_HOURS*12);
- if(!points.length){
-  g.fillStyle='#666';g.font='14px system-ui,sans-serif';
-  g.fillText('No data',pad.l+8,h/2);
-  return;
- }
+ const t1=allPoints.length?allPoints[allPoints.length-1].ts:Math.floor(Date.now()/1000);
+ const t0=t1-CHART_HOURS*3600;
+ const xSpan=CHART_HOURS*3600;
 
- const {min:yMin,max:yMax}=yBounds(points);
+ let points=allPoints.filter(p=>p.ts>=t0&&p.ts<=t1);
+ if(!points.length&&allPoints.length) points=[allPoints[allPoints.length-1]];
+
+ const {min:yMin,max:yMax}=yBounds(points.length?points:allPoints);
  const ySpan=yMax-yMin||5;
  g.font='11px system-ui,sans-serif';
  g.strokeStyle='#e5e7eb';g.lineWidth=1;
@@ -121,25 +121,39 @@ function drawChart(allPoints){
  }
  g.textAlign='left';
 
- const t0=points[0].ts,t1=points[points.length-1].ts;
- const span=t1-t0||1;
- let hourStart=Math.ceil(t0/3600)*3600;
- g.fillStyle='#666';
- for(let t=hourStart;t<=t1;t+=3600){
-  const x=pad.l+pw*(t-t0)/span;
-  g.beginPath();g.moveTo(x,pad.t);g.lineTo(x,h-pad.b);g.strokeStyle='#f0f0f0';g.stroke();
-  g.fillStyle='#666';g.fillText(fmtHour(t),Math.max(pad.l,Math.min(x-14,w-pad.r-36)),h-8);
+ g.strokeStyle='#cbd5e1';g.lineWidth=1;
+ g.beginPath();g.moveTo(pad.l,baseY);g.lineTo(w-pad.r,baseY);g.stroke();
+
+ g.font='10px system-ui,sans-serif';
+ for(let i=0;i<=CHART_HOURS;i++){
+  const tickTs=t0+i*3600;
+  const x=pad.l+pw*(i/CHART_HOURS);
+  if(i>0&&i<CHART_HOURS){
+   g.strokeStyle='#f3f4f6';g.lineWidth=1;
+   g.beginPath();g.moveTo(x,pad.t);g.lineTo(x,baseY);g.stroke();
+  }
+  g.fillStyle='#dc2626';
+  g.beginPath();g.arc(x,baseY,3.5,0,Math.PI*2);g.fill();
+  g.fillStyle='#444';g.textAlign='center';
+  g.fillText(fmtHour(tickTs),x,baseY+14);
+ }
+ g.textAlign='left';
+
+ if(!points.length){
+  g.fillStyle='#666';g.font='14px system-ui,sans-serif';
+  g.fillText('No data in last 12 h',pad.l+8,h/2);
+  return;
  }
 
  g.strokeStyle='#2563eb';g.lineWidth=2;g.beginPath();
  points.forEach((p,i)=>{
-  const x=pad.l+pw*(p.ts-t0)/span;
+  const x=pad.l+pw*Math.min(1,Math.max(0,(p.ts-t0)/xSpan));
   const y=pad.t+ph*(1-(p.temp-yMin)/ySpan);
   if(i===0)g.moveTo(x,y);else g.lineTo(x,y);
  });
  g.stroke();
  points.forEach(p=>{
-  const x=pad.l+pw*(p.ts-t0)/span;
+  const x=pad.l+pw*Math.min(1,Math.max(0,(p.ts-t0)/xSpan));
   const y=pad.t+ph*(1-(p.temp-yMin)/ySpan);
   g.fillStyle='#2563eb';g.beginPath();g.arc(x,y,2.5,0,Math.PI*2);g.fill();
  });
