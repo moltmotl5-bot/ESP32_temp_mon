@@ -19,23 +19,28 @@ constexpr const char* NVS_NS = "temp-mon";
 constexpr const char* KEY_HEAD = "head";
 constexpr const char* KEY_COUNT = "count";
 constexpr const char* KEY_DATA_LEGACY = "data";
-constexpr const char* KEY_DATA0 = "dat0";
-constexpr const char* KEY_DATA1 = "dat1";
-constexpr const char* KEY_DATA2 = "dat2";
 
-constexpr uint16_t CHUNK_RECORDS = RECORD_MAX / 3;  // 288 records x 12 B = 3456 B per key
-static_assert(CHUNK_RECORDS * 3 == RECORD_MAX, "RECORD_MAX must divide into 3 NVS chunks");
+constexpr int CHUNK_COUNT = 6;
+constexpr uint16_t CHUNK_RECORDS = RECORD_MAX / CHUNK_COUNT;  // 144 records = 1728 B
+static_assert(CHUNK_RECORDS * CHUNK_COUNT == RECORD_MAX, "RECORD_MAX must divide into chunks");
 constexpr size_t CHUNK_BYTES = CHUNK_RECORDS * sizeof(TempRecord);
 
-constexpr const char* CHUNK_KEYS[3] = {KEY_DATA0, KEY_DATA1, KEY_DATA2};
+constexpr const char* CHUNK_KEYS[CHUNK_COUNT] = {"dat0", "dat1", "dat2", "dat3", "dat4", "dat5"};
 
 void sanitizeMeta() {
   if (head >= RECORD_MAX) head = 0;
   if (count > RECORD_MAX) count = RECORD_MAX;
 }
 
+void removeAllDataKeys() {
+  prefs.remove(KEY_DATA_LEGACY);
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
+    prefs.remove(CHUNK_KEYS[i]);
+  }
+}
+
 bool chunkSizesValid() {
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
     if (prefs.getBytesLength(CHUNK_KEYS[i]) != CHUNK_BYTES) {
       return false;
     }
@@ -46,7 +51,7 @@ bool chunkSizesValid() {
 bool loadChunkedRecords() {
   if (!chunkSizesValid()) return false;
 
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
     const size_t offset = static_cast<size_t>(i) * CHUNK_BYTES;
     if (prefs.getBytes(CHUNK_KEYS[i], reinterpret_cast<uint8_t*>(records) + offset, CHUNK_BYTES) !=
         CHUNK_BYTES) {
@@ -62,9 +67,9 @@ bool loadLegacyRecords() {
   return prefs.getBytes(KEY_DATA_LEGACY, records, sizeof(records)) == sizeof(records);
 }
 
-bool saveChunkedRecords() {
+bool saveChunkedRecordsOnce() {
   bool ok = true;
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < CHUNK_COUNT; ++i) {
     const size_t offset = static_cast<size_t>(i) * CHUNK_BYTES;
     const size_t written =
         prefs.putBytes(CHUNK_KEYS[i], reinterpret_cast<const uint8_t*>(records) + offset, CHUNK_BYTES);
@@ -74,26 +79,25 @@ bool saveChunkedRecords() {
       ok = false;
     }
   }
-  if (ok) {
-    prefs.remove(KEY_DATA_LEGACY);
-  }
   return ok;
 }
 
-void resetStoreLocked() {
-  memset(records, 0, sizeof(records));
-  head = 0;
-  count = 0;
-  prefs.putUShort(KEY_HEAD, head);
-  prefs.putUShort(KEY_COUNT, count);
-  saveChunkedRecords();
+bool saveChunkedRecords() {
+  removeAllDataKeys();
+  if (saveChunkedRecordsOnce()) {
+    return true;
+  }
+
+  Serial.println("Record store: retry after clearing data keys");
+  removeAllDataKeys();
+  return saveChunkedRecordsOnce();
 }
 
 void persistLocked() {
   prefs.putUShort(KEY_HEAD, head);
   prefs.putUShort(KEY_COUNT, count);
   if (!saveChunkedRecords()) {
-    Serial.println("Record store: persist failed");
+    Serial.println("Record store: persist failed — NVS may be full; use BOOT long clear or erase NVS");
   }
 }
 
@@ -114,15 +118,17 @@ void recordStoreInit() {
   count = prefs.getUShort(KEY_COUNT, 0);
   sanitizeMeta();
 
-  const bool hasLegacy = prefs.getBytesLength(KEY_DATA_LEGACY) == sizeof(records);
+  const bool hasLegacy = prefs.getBytesLength(KEY_DATA_LEGACY) > 0;
   const bool loadedData = loadChunkedRecords() || loadLegacyRecords();
   if (!loadedData) {
     memset(records, 0, sizeof(records));
-    if (head != 0 || count != 0) {
+    removeAllDataKeys();
+    if (head != 0 || count != 0 || hasLegacy) {
       Serial.println("Record store: data blob missing, resetting meta");
       head = 0;
       count = 0;
-      persistLocked();
+      prefs.putUShort(KEY_HEAD, head);
+      prefs.putUShort(KEY_COUNT, count);
     }
   } else if (hasLegacy && !chunkSizesValid()) {
     Serial.println("Record store: migrating legacy blob to chunked NVS");
@@ -198,8 +204,15 @@ bool recordStoreLatestTimestamp(uint32_t* outTs) {
 void recordStoreClear() {
   if (!loaded) recordStoreInit();
 
+  memset(records, 0, sizeof(records));
+  head = 0;
+  count = 0;
+
   prefs.begin(NVS_NS, false);
-  resetStoreLocked();
+  removeAllDataKeys();
+  prefs.putUShort(KEY_HEAD, head);
+  prefs.putUShort(KEY_COUNT, count);
+  saveChunkedRecords();
   prefs.end();
 
   Serial.println("Record store cleared");
