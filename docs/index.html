@@ -27,6 +27,13 @@
     th{background:#f9fafb;font-weight:600;color:#444}
     tbody tr:last-child td{border-bottom:none}
     .table-scroll{max-height:480px;overflow-y:auto}
+    .chart-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+    .chart-range-btns{display:flex;gap:6px}
+    .chart-range-btns button,.chart-live{font-size:.8rem;padding:6px 10px;border:1px solid #ccd;border-radius:6px;background:#fff;cursor:pointer}
+    .chart-range-btns button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+    .chart-scroll{flex:1;min-width:180px;display:flex;align-items:center;gap:8px;font-size:.8rem;color:#555}
+    .chart-scroll input[type=range]{flex:1;min-width:80px}
+    #chart-range-label{font-size:.75rem;color:#666;white-space:nowrap}
     .foot{font-size:.75rem;color:#666;text-align:center;margin-top:8px}
   </style>
 </head>
@@ -56,7 +63,20 @@
     </div>
     <div class="meta" id="meta">Loading…</div>
     <div class="chart-box">
-      <div class="section-label">12-hour temperature (Y: 5 °C grid, X: hourly)</div>
+      <div class="section-label" id="chart-window-label">12-hour window (scroll back up to 3 days)</div>
+      <div class="chart-controls">
+        <div class="chart-range-btns">
+          <button type="button" data-chart-hours="12" class="active">12h</button>
+          <button type="button" data-chart-hours="24">24h</button>
+          <button type="button" data-chart-hours="72">3 days</button>
+        </div>
+        <div class="chart-scroll" id="chart-scroll-wrap">
+          <span>Scroll back</span>
+          <input type="range" id="chart-scroll" min="0" max="0" value="0" step="1">
+        </div>
+        <button type="button" id="chart-live-btn" class="chart-live">Live</button>
+      </div>
+      <div id="chart-range-label">--</div>
       <canvas id="chart"></canvas>
     </div>
     <div class="table-box">
